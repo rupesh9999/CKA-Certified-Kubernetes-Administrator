@@ -105,3 +105,83 @@ k exec app -n exercise-03 -- ls /etc/config/
 ```
 
 </details>
+
+
+### English Explanation
+
+In Kubernetes, **`volumes`** and **`volumeMounts`** work together as a two-step process to attach storage to your containers.
+
+#### Real-world Analogy:
+* **`volumes`** = Buying an external hard drive or USB pen drive. You have the storage ready at the computer (Pod) level, but no folder is using it yet.
+* **`volumeMounts`** = Plugging that USB drive into a specific port and mapping it to a folder path (like `D:\files` or `/etc/config`) so a specific software (Container) can read or write files.
+
+---
+
+#### Key Differences:
+
+| Feature | `spec.volumes` | `spec.containers[].volumeMounts` |
+| :--- | :--- | :--- |
+| **Level** | **Pod level** | **Container level** |
+| **Question it answers** | *What* storage exists and *where* does data come from? | *Where* inside the container filesystem should it appear? |
+| **Scope** | Available to **all** containers in the Pod | Specific to **one** container |
+| **Typical Fields** | `name`, storage source (`configMap`, `secret`, `pvc`, `emptyDir`, etc.) | `name` (matching the volume), `mountPath`, `readOnly` |
+
+---
+
+#### Example from [app.yaml](file:///home/rupesh/CKA-Certified-Kubernetes-Administrator/exercises/03-configmap-secret/app.yaml):
+
+```yaml
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      # 2. volumeMounts (Container Level):
+      # Mounts the volume named "config-vol" into this container at path "/etc/config"
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/config
+
+  # 1. volumes (Pod Level):
+  # Declares the storage source (here, a ConfigMap named app-config) and names it "config-vol"
+  volumes:
+    - name: config-vol
+      configMap:
+        name: app-config
+```
+
+> **Why are they separated?**
+> A single Pod can run multiple containers. By defining the `volume` once at the Pod level, multiple containers can mount the exact same volume at different paths (e.g., container A mounts it at `/data` as read-write, while container B mounts it at `/backup` as read-only).
+
+---
+
+---
+
+### తెలుగు వివరణ (Telugu Explanation)
+
+కుబెర్‌నెటిస్ (Kubernetes) లో **`volumes`** మరియు **`volumeMounts`** అనేవి కంటైనర్‌కి స్టోరేజ్ (డేటా/ఫైల్స్) అందించడానికి వాడే రెండు ముఖ్యమైన భాగాలు.
+
+#### నిజ జీవిత ఉదాహరణ (Real-world Analogy):
+* **`volumes`**: మీ చేతిలో ఒక **పెన్‌డ్రైవ్ (Pen Drive)** లేదా ఎక్స్‌టర్నల్ హార్డ్ డిస్క్ ఉండటం వంటిది. అంటే స్టోరేజ్ సిస్టమ్ (Pod) దగ్గర సిద్ధంగా ఉంది.
+* **`volumeMounts`**: ఆ పెన్‌డ్రైవ్‌ను కంప్యూటర్‌కు కనెక్ట్ చేసి, ఒక ప్రత్యేకమైన ఫోల్డర్ (Path - ఉదాహరణకు `/etc/config`) లో ఓపెన్ చేసి వాడటం వంటిది.
+
+---
+
+#### ప్రధాన తేడాలు (Key Differences):
+
+1. **`volumes` (Pod Level - పాడ్ స్థాయి):**
+   - ఇది Pod డెఫినిషన్‌లో (`spec.volumes`) ఉంటుంది.
+   - ఇది **"స్టోరేజ్ మూలం ఏంటి?"** అని చెబుతుంది (అది ConfigMap ఆ? Secret ఆ? లేక PersistentVolumeClaim ఆ?).
+   - ఆ స్టోరేజ్ మొత్తానికి ఒక పేరు (`name`) ఇస్తుంది.
+   - పాడ్ లోపల ఉన్న అన్ని కంటైనర్లకి ఈ వాల్యూమ్ అందుబాటులో ఉంటుంది.
+
+2. **`volumeMounts` (Container Level - కంటైనర్ స్థాయి):**
+   - ఇది Container డెఫినిషన్‌లో (`spec.containers[].volumeMounts`) ఉంటుంది.
+   - ఇది **"ఆ స్టోరేజ్ కంటైనర్ లోపల ఏ డైరెక్టరీ/పాత్‌లో (`mountPath`) కనిపించాలి?"** అని నిర్ణయిస్తుంది.
+   - `volumes` లో ఇచ్చిన పేరును రిఫరెన్స్ చేసి, ఆ కంటైనర్ ఫైల్ సిస్టమ్‌కి అటాచ్ చేస్తుంది.
+
+---
+
+#### ముఖ్యమైన ప్రయోజనం:
+ఒక Pod లో రెండు లేదా అంతకంటే ఎక్కువ కంటైనర్లు ఉన్నప్పుడు, `volumes` కింద **ఒకేసారి** స్టోరేజ్ డిఫైన్ చేసి:
+- కంటైనర్ 1 ఆ డేటాను `/app/data` లో మౌంట్ చేసుకోవచ్చు (Read-Write).
+- కంటైనర్ 2 అదే డేటాను `/var/log` లో రీడ్-ఓన్లీగా (`readOnly: true`) మౌంట్ చేసుకోవచ్చు.
