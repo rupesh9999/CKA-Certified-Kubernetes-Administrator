@@ -206,20 +206,20 @@ Kubernetes networking follows a clean layered model: **CNI** establishes the phy
 ```mermaid
 flowchart TD
     subgraph Node["Kubernetes Node"]
-        Kubelet["Kubelet (Node Agent)"] -->|CRI (gRPC)| Containerd["Container Runtime (containerd/CRI-O)"]
-        Containerd -->|Invokes binaries in /opt/cni/bin| CNI["CNI Plugin (Calico / Cilium / Flannel)"]
-        CNI -->|Reads configs in /etc/cni/net.d| NetD["CNI Config (10-calico.conflist)"]
-        CNI -->|Provisions veth pair & IPAM| Pod["Pod (Network Namespace)"]
+        Kubelet["Kubelet (Node Agent)"] -->|"CRI (gRPC)"| Containerd["Container Runtime (containerd/CRI-O)"]
+        Containerd -->|"Invokes binaries in /opt/cni/bin"| CNI["CNI Plugin (Calico / Cilium / Flannel)"]
+        CNI -->|"Reads configs in /etc/cni/net.d"| NetD["CNI Config (10-calico.conflist)"]
+        CNI -->|"Provisions veth pair & IPAM"| Pod["Pod (Network Namespace)"]
     end
 
     subgraph ServiceDiscovery["Service Discovery"]
-        Pod -->|Resolves svc via UDP 53| CoreDNS["CoreDNS (kube-system)"]
+        Pod -->|"Resolves svc via UDP 53"| CoreDNS["CoreDNS (kube-system)"]
     end
 
     subgraph Security["Firewall / Security (NetworkPolicy)"]
         NP["NetworkPolicy Controller (Calico Felix / Cilium eBPF)"]
-        NP -.->|Inspects & filters Ingress (Incoming)| Pod
-        NP -.->|Inspects & filters Egress (Outgoing)| Pod
+        NP -.->|"Inspects & filters Ingress"| Pod
+        NP -.->|"Inspects & filters Egress"| Pod
     end
 ```
 
