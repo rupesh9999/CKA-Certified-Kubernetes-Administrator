@@ -80,7 +80,7 @@ These mocks are slightly **harder** than real exams, so scoring 12+/15 on mocks 
 
 - 15 questions covering all CKA domains with different scenarios than Exam 01
 - 2-hour time limit
-- Questions emphasize Service DNS, Deployment updates, Secrets, DaemonSets, API Server debugging, ConfigMap updates, PriorityClass, Service types, CronJobs, Certificate rotation, Pod Disruption Budgets, CRDs, Pod Security Policies, StorageClass, and Resource governance
+- Questions emphasize Service DNS, Deployment updates, Secrets, DaemonSets, API Server debugging, ConfigMap updates, PriorityClass, Service types, CronJobs, Pod Disruption Budgets, CRDs, Pod Security Standards, StorageClass, and Resource governance
 - **Difficulty:** Medium-Hard (different mix from Exam 01, tests similar depth)
 
 **Files:**
@@ -123,9 +123,11 @@ These mocks are slightly **harder** than real exams, so scoring 12+/15 on mocks 
 - **Storage** → Redo exercises 12, 25
 
 **Critical exercises (make sure these are solid):**
-- Exercise 04 (RBAC) — 25% of exam weight
+- Exercise 04 (RBAC) — part of the 25% Cluster Architecture domain
 - Exercise 12 (Storage) — 10% of exam weight
-- Exercise 28 (NetworkPolicy) — 13% of exam weight
+- Exercise 28 (NetworkPolicy) — part of the 20% Services & Networking domain
+
+Domain weights apply to the exam domains, not to individual exercises or questions.
 
 ---
 
@@ -133,10 +135,10 @@ These mocks are slightly **harder** than real exams, so scoring 12+/15 on mocks 
 
 | Factor | Mock Exams | Real CKA |
 |--------|-----------|----------|
-| Questions | 15 | 15-17 |
+| Task count | 15 in each practice mock | The Linux Foundation does not publish a fixed count |
 | Time | 120 min | 120 min |
-| Pacing | ~8 min/question | ~7 min/question |
-| Passing Score | 66% (10/15) | 66% (11/17) |
+| Average time per task | 8 minutes across 15 mock questions | Varies by task and its assigned weight |
+| Passing Score | 66% | 66% |
 | Kubernetes access | Your cluster | Exam cluster |
 | Browser | Your own | Linux Foundation browser |
 | kubectl | Both available | Both available |
@@ -286,7 +288,7 @@ If all ✅ → Schedule exam. You're ready for 85%+ score.
 ### If you scored <10/15 on either mock:
 1. **Not ready** — Do not schedule real exam yet
 2. **Review solutions thoroughly** — Understand each mistake
-3. **Redo weak exercises** — Go back to 01-31 for that domain
+3. **Redo weak exercises** — Go back to the relevant exercise for that domain
 4. **Wait 1-2 weeks** — Let concepts soak
 5. **Retake mock** (same exam is fine for practice)
 6. **When consistently 12+/15:** Schedule real exam
@@ -303,7 +305,7 @@ These are practice scenarios inspired by real CKA exam domains and topics. They 
 
 - 📖 **Exercise Theory:** See [DOMAINS.md](../DOMAINS.md) for domain-to-exercise mapping
 - 📝 **Self-Grading:** Use [GRADING.md](../GRADING.md) to score individual exercises
-- 🔧 **Reference Solutions:** Check [solutions/](../solutions/) for sample implementations
+- 🔧 **Reference Solutions:** See [Mock Exam 01 solutions](MOCK-EXAM-01-SOLUTIONS.md) and [Mock Exam 02 solutions](MOCK-EXAM-02-SOLUTIONS.md)
 - 🎓 **Official CKA:** [Linux Foundation CKA Exam](https://linuxfoundation.org/certifications/kubernetes-administrator-cka/)
 
 ---

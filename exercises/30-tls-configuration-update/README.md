@@ -1,6 +1,6 @@
 # Exercise 30 — TLS Configuration Update (Cipher Support)
 
-> Related: [README — Security](../../README.md#domain-4--security-12) | **Updated May 2026**
+> Supplemental application practice: changing TLS settings in an example service. This is not a named task in the current CKA curriculum; do not confuse it with Kubernetes control-plane certificate management.
 
 Update TLS configuration to support additional protocol versions for backward compatibility. Tests ConfigMap modification and service restart.
 

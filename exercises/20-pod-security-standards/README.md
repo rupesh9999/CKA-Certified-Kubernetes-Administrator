@@ -128,7 +128,7 @@ k label ns exercise-20-audit \
 # Test restricted enforcement
 # This command will fail:
 kubectl run restricted-test --image=nginx:1.28 -n exercise-20 --dry-run=server
-# Error: pods "restricted-test" is forbidden: violates PodSecurityPolicy: ...
+# Error: pods "restricted-test" is forbidden: violates PodSecurity "restricted:latest": ...
 
 # Create compliant pod for restricted namespace
 cat <<EOF | k apply -f -

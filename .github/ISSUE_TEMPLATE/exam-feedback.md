@@ -12,7 +12,7 @@ assignees: ''
 
 **Date:** <!-- Month Year -->
 
-**Kubernetes version on exam:** <!-- e.g., v1.35 -->
+**Kubernetes version on exam:** <!-- e.g., v1.37 -->
 
 **Study duration:** <!-- e.g., 4 weeks -->
 

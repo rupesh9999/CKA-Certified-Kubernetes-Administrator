@@ -1,12 +1,14 @@
 # Exercise 18 — CRI-dockerd Installation & Configuration
 
+> Supplemental implementation practice: installing Docker and CRI-dockerd. The CKA curriculum includes cluster setup and runtime interfaces, but does not name this specific runtime as an exam task.
+>
 > Related: [Cluster Architecture](../../README.md#domain-4--cluster-architecture-installation--configuration-25) | Container runtime setup for kubeadm clusters
 
 Install and configure cri-dockerd as a container runtime for a Kubernetes node. This is common when upgrading clusters that need Docker support or when preparing a mixed-runtime cluster.
 
 ## Context
 
-Kubernetes deprecated dockershim in v1.20 and removed it in v1.24. To continue using Docker as a container runtime, you must install CRI-dockerd explicitly. The exam may ask you to prepare a node to join a cluster using Docker via CRI-dockerd, or troubleshoot why a node can't join because the runtime isn't configured.
+Kubernetes deprecated dockershim in v1.20 and removed it in v1.24. To use Docker Engine as a container runtime, a CRI-compatible adapter such as CRI-dockerd is required. Treat the installation steps in this lab as extra implementation practice, not an exam prediction.
 
 ## Tasks
 

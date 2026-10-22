@@ -1,6 +1,6 @@
 # Exam Strategy: Personalized Study Roadmap
 
-**Last Updated: June 2026** | Framework-based study optimization
+**Last Updated: October 2026** | Study planning based on the current CKA domain weights
 
 Stop studying linearly. This guide helps you **focus on YOUR gaps** and prepare efficiently.
 
@@ -20,14 +20,14 @@ Know your **weak spots**, understand their **exam weight**, and study in **prior
 
 ## Step 1: Score Yourself (5 minutes)
 
-Open [GRADING.md](GRADING.md) and score each exercise **honestly**:
+Open [GRADING.md](GRADING.md) and score each exercise **honestly**. The supplemental exercises are useful practice, but don't assign them an official CKA domain weight:
 - 9-10: Mastered
 - 7-8: Competent
 - 5-6: Got it, needs polish
 - 3-4: Weak (this is where focus begins)
 - <3: Very weak (URGENT)
 
-Write down your scores for all 31 exercises.
+Write down your scores and use the domain-weight formula only for exercises mapped to an official CKA domain.
 
 ---
 
@@ -35,17 +35,15 @@ Write down your scores for all 31 exercises.
 
 The CKA exam isn't equally distributed. Some topics are tested more:
 
-| Domain | Official Weight | Realistic Pass Requirement | Your Study Priority If Weak |
-|--------|-----------------|---------------------------|-----|
-| **Storage** | 20% | 3-4 questions (12 min) | **HIGHEST** — most fail here |
-| **Troubleshooting** | 17% | 3-4 questions (12 min) | **HIGH** — complex diagnosis |
-| **RBAC** | 15% | 2-3 questions (9 min) | **HIGH** — nuanced rules |
-| **Networking** | 13% | 2-3 questions (8 min) | **MEDIUM-HIGH** — complex setup |
-| **Cluster Architecture** | 12% | 2-3 questions (7 min) | MEDIUM |
-| **Deployments & Scaling** | 12% | 2-3 questions (7 min) | MEDIUM |
-| **API Objects** | 11% | 2-3 questions (6 min) | MEDIUM |
+| Official domain | Weight | Study focus when weak |
+|--------|-------:|-----------------------|
+| **Troubleshooting** | 30% | Logs, events, nodes, and cluster components |
+| **Cluster Architecture, Installation & Configuration** | 25% | RBAC, kubeadm, cluster lifecycle, and extensions |
+| **Services & Networking** | 20% | Services, DNS, NetworkPolicy, Ingress, and Gateway API |
+| **Workloads & Scheduling** | 15% | Pods, controllers, resource management, and scheduling |
+| **Storage** | 10% | PVs, PVCs, StorageClasses, and binding |
 
-**Key insight:** Storage + Troubleshooting + RBAC = ~52% of exam. If you're weak in ALL THREE, you cannot pass.
+These are domain weights, not guaranteed question counts or time allocations. See [DOMAINS.md](DOMAINS.md) for the source links.
 
 ---
 
@@ -53,21 +51,23 @@ The CKA exam isn't equally distributed. Some topics are tested more:
 
 **Formula:**
 ```
-Priority = (10 - your_score) × domain_weight / 10
+Priority = (10 - your_score) × domain_weight
 ```
 
 **Example:**
 ```
 Exercise 12 (Storage): Your score 3/10
-Priority = (10 - 3) × 20 / 10 = 14 points
+Priority = (10 - 3) × 10 = 70 points
 
 Exercise 04 (RBAC): Your score 5/10
-Priority = (10 - 5) × 15 / 10 = 7.5 points
+RBAC is part of Cluster Architecture (25%)
+Priority = (10 - 5) × 25 = 125 points
 
 Exercise 16 (HPA): Your score 8/10
-Priority = (10 - 8) × 12 / 10 = 2.4 points
+HPA is part of Workloads & Scheduling (15%)
+Priority = (10 - 8) × 15 = 30 points
 
-→ Study order: Exercise 12 (14) → Exercise 04 (7.5) → Exercise 16 (2.4)
+→ By this rough score: Exercise 04 (125) → Exercise 12 (70) → Exercise 16 (30)
 ```
 
 ---
@@ -77,7 +77,7 @@ Priority = (10 - 8) × 12 / 10 = 2.4 points
 Based on your scores, estimate prep time:
 
 ```
-Total score across all 31 exercises / 31 = Average Score
+Total score across all 32 exercises / 32 = Average Score
 
 0-3 avg:   40-50 hours needed
 3-5 avg:   30-40 hours needed
@@ -88,7 +88,7 @@ Total score across all 31 exercises / 31 = Average Score
 
 Then allocate time by **weak domain priority** (not equally):
 
-Example (30 hours total available):
+Example personal allocation (30 hours total; these are study hours, not exam weights):
 ```
 Storage (score 3):        8 hours (27%)
 RBAC (score 5):           5 hours (17%)
@@ -277,7 +277,7 @@ Use GRADING.md scoring criteria:
 
 **READY (80%+ pass likely):**
 - All domains ≥7/10, OR
-- Weak domain (5-6/10) is low-weight (<12%), OR
+- Weak domain (5-6/10) is low-weight (<15%), OR
 - Average across all exercises ≥7/10
 
 **BORDERLINE (50-80% pass):****
@@ -323,16 +323,16 @@ Based on pedagogical research and practical testing:
 
 ## Time Management on Exam Day
 
-Assuming **17-25 questions, 120 minutes, 66% pass**:
+The exam is two hours, but the Linux Foundation does not publish a fixed task count. Use this as a sample plan and adjust it to the tasks and weights shown in your exam:
 
-| Question Range | Difficulty | Time Budget | Strategy |
-|--------|-----------|------------|----------|
-| Q1-5 | Easy | 10 min | Fast (2 min each) — build confidence |
-| Q6-12 | Medium | 35 min | 5 min each — read carefully |
-| Q13-17 | Hard | 35 min | Don't get stuck, 6-7 min each |
-| Buffer | — | 15 min | Go back to skipped/uncertain questions |
+| Phase | Time | Strategy |
+|---|---:|---|
+| Scan | 5 min | Read the tasks and note their weights and cluster contexts |
+| First pass | 75 min | Complete tasks you can solve quickly; flag time-consuming ones |
+| Second pass | 35 min | Return to flagged tasks, starting with higher-value work you can finish |
+| Final check | 5 min | Verify key resources and make sure changes were applied to the right cluster |
 
-**Pacing rule:** If you haven't answered Q1-5 by 10 min, you're too slow. Skip and return.
+**Pacing rule:** If you're stuck, move on and come back if time remains.
 
 ---
 
@@ -350,7 +350,7 @@ If you see these during practice, you're likely to fail the real exam:
 
 ## Resources
 
-- [GRADING.md](GRADING.md) — Detailed rubric for all 31 exercises + scoring criteria
+- [GRADING.md](GRADING.md) — Detailed rubric for all 32 exercises + scoring criteria
 - [DIAGNOSTICS.md](DIAGNOSTICS.md) — Troubleshooting decision trees by symptom
 - [DIAGNOSTICS.md](DIAGNOSTICS.md) — Troubleshooting flowcharts by symptom
 - [DOMAINS.md](DOMAINS.md) — Domain breakdown + official weights

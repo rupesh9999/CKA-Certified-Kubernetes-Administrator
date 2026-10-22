@@ -84,11 +84,14 @@ Create PersistentVolumes, PersistentVolumeClaims, and mount them into pods. This
   - Risky for exercise: if you delete PVC, PV disappears
 
 **Access Modes Explained (Reddit: Candidates mix these up)**
-- `ReadWriteOnce (RWO)`: Only one Pod can mount (read+write). Single pod attachment.
-- `ReadOnlyMany (ROM)`: Multiple Pods can mount (read-only).
+- `ReadWriteOnce (RWO)`: A volume can be mounted as read-write by a single node at a time. Multiple pods on the same node may share the same volume read-write, but it cannot be mounted read-write on two different nodes at the same time.
+- `ReadWriteOncePod (RWOP)`: The volume can be mounted as read-write by only one pod, regardless of node. This is the pod-scoped exclusivity mode.
+- `ReadOnlyMany (ROX)`: Multiple Pods can mount (read-only).
 - `ReadWriteMany (RWX)`: Multiple Pods can mount (read+write). Requires network storage (NFS, etc).
-- **Common exam mistake:** Using RWO then trying to mount same PVC on 2 Pods → fails
-- **Test this:** Try mounting same RWO PVC on 2 Pods → second Pod stays Pending
+- **Common exam mistake:** Confusing `ReadWriteOnce` with `ReadWriteOncePod`. `RWO` is node-scoped, not pod-scoped. `RWOP` is the mode that restricts access to a single pod.
+- **Test this:** On the same node, two Pods can often read/write the same `ReadWriteOnce` PVC. If you need strict single-pod write access, use `ReadWriteOncePod` instead.
+
+> **CKA note:** For Kubernetes 1.36+, the exam-safe wording is: `RWO` = one node, `RWOP` = one pod.
 
 > **Storage Binding Requires Name Exactness**
 > 
@@ -105,6 +108,20 @@ Create PersistentVolumes, PersistentVolumeClaims, and mount them into pods. This
 > **hostPath Directory Must Exist on Node**
 >
 > Created PV with `hostPath: /data/exercise-12` but forgot to `mkdir -p /data/exercise-12` on the node. Pod stayed Pending. The node has to have the backing directory, and if running on a multi-node cluster, the Pod might land on a node that doesn't have it. Consider this when designing storage tests.
+
+> **Real cluster behavior + common failure causes**
+>
+> `PVC Bound` only proves the bind succeeded. It does not prove the storage is usable. The real proof is a Pod in `Running` state and a successful write/read from the mounted volume.
+>
+> Common causes of failure:
+> - PV and PVC `accessModes` do not match exactly
+> - `storageClassName` values differ (`manual` vs `standard`)
+> - PVC and Pod are in different namespaces
+> - the hostPath directory does not exist on the node
+> - the Pod is scheduled to a node without the backing directory
+> - events show a mount or scheduling issue even when the YAML looks correct
+>
+> Always validate with `k get pv`, `k get pvc`, `k get pod`, and `k get events` before concluding the storage setup is healthy.
 
 ## Verify + Cleanup
 

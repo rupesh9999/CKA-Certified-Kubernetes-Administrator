@@ -1,8 +1,10 @@
 # Exercise 26 — CRI-dockerd Installation and Configuration
 
+> Supplemental implementation practice: installing and configuring CRI-dockerd. See the current [CKA curriculum](https://github.com/cncf/curriculum/blob/master/CKA_Curriculum_v1.37.pdf) for official exam scope.
+>
 > Related: [README — Cluster Maintenance](../../README.md#domain-7--cluster-maintenance-11)
 
-Install and configure cri-dockerd as a container runtime alternative to containerd. Essential for clusters using Docker as the container runtime.
+Install and configure cri-dockerd as a container runtime alternative to containerd. This is useful implementation practice for clusters that choose Docker Engine, but the curriculum does not require this specific runtime.
 
 ## Tasks
 

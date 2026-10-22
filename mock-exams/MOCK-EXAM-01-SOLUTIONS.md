@@ -633,7 +633,7 @@ k run priv-pod --image=nginx --privileged -n restricted
 Expected result:
 ```
 Error from server (Forbidden): pods "priv-pod" is forbidden:
-violates PodSecurityPolicy: privileged: true
+violates PodSecurity "restricted:latest": privileged (container "nginx" must not set securityContext.privileged=true)
 ```
 
 **Key insight:** Enforcement (`enforce`) blocks pods that violate the policy. Audit and warn levels log violations but allow them. `restricted` PSS requires no privileged containers, read-only root filesystem, etc.

@@ -1,10 +1,10 @@
 # CKA Exercises
 
-31 hands-on labs covering all seven CKA exam domains. Each one has a task list, hints (use them — they save time), verification commands, and a full solution behind a spoiler tag.
+32 hands-on labs covering the five official CKA exam domains, plus a small number of clearly marked supplemental labs. Each one has a task list, hints, verification commands, and a full solution behind a spoiler tag. The current [CNCF CKA curriculum](https://github.com/cncf/curriculum/blob/master/CKA_Curriculum_v1.37.pdf) is the source for exam scope; supplemental labs are useful practice, not a claim that the named product or implementation will appear on the exam.
 
 I ordered these roughly by difficulty. If you're short on time, prioritize 09 (kubeadm), 11 (troubleshooting), 29 (etcd fix), and 28 (NetworkPolicy) — those cover the highest-weight domains and represent real exam patterns.
 
-**New in v2.0:** Exercises 23-31 based on 2026 real exam feedback. These test advanced scenarios and common failure patterns.
+**New in v2.0:** Exercises 23-32 add advanced scenarios and troubleshooting practice.
 
 | # | Exercise | Domain | Difficulty | Time |
 |---|---|---|---|---|
@@ -25,27 +25,28 @@ I ordered these roughly by difficulty. If you're short on time, prioritize 09 (k
 | 15 | [Gateway API](15-gateway-api/) | Services & Networking | Medium | 20 min |
 | 16 | [Horizontal Pod Autoscaler](16-hpa/) | Workloads & Scheduling | Medium | 15 min |
 | 17 | [kubectl debug](17-kubectl-debug/) | Troubleshooting | Medium | 15 min |
-| 18 | [CRI-dockerd Setup](18-cri-dockerd-setup/) | Cluster Architecture | Medium | 15 min |
+| 18 | [CRI-dockerd Setup (supplemental implementation practice)](18-cri-dockerd-setup/) | Cluster Architecture | Medium | 15 min |
 | 19 | [Classic Ingress](19-ingress-classic/) | Services & Networking | Medium | 15 min |
-| 20 | [Pod Security Standards](20-pod-security-standards/) | Cluster Architecture | Medium | 15 min |
+| 20 | [Pod Security Standards](20-pod-security-standards/) | Workloads & Scheduling | Medium | 15 min |
 | 21 | [Jobs & CronJobs](21-jobs-cronjobs/) | Workloads & Scheduling | Medium | 15 min |
 | 22 | [PriorityClass](22-priorityclass/) | Workloads & Scheduling | Medium | 15 min |
 | 23 | [Resource Requests Tuning](23-resource-requests-tuning/) | Workloads & Scheduling | Hard | 20 min |
 | 24 | [PriorityClass Patch](24-priorityclass-patch/) | Workloads & Scheduling | Medium | 15 min |
 | 25 | [Storage WaitForFirstConsumer](25-storage-waitforfirstconsumer/) | Storage | Hard | 20 min |
-| 26 | [CRI-dockerd Installation](26-cri-dockerd-setup/) | Cluster Architecture | Hard | 30 min |
-| 27 | [CNI Tigera/Calico Install](27-cni-tigera-install/) | Services & Networking | Hard | 30 min |
+| 26 | [CRI-dockerd Installation (supplemental implementation practice)](26-cri-dockerd-setup/) | Cluster Architecture | Hard | 30 min |
+| 27 | [CNI Tigera/Calico Install](27-cni-tigera-install/) | Cluster Architecture | Hard | 30 min |
 | 28 | [Complex NetworkPolicy](28-network-policy-complex/) | Services & Networking | Hard | 25 min |
 | 29 | [Troubleshoot etcd Endpoint](29-troubleshoot-etcd-endpoint/) | Troubleshooting | Hard | 20 min |
-| 30 | [TLS Configuration Update](30-tls-configuration-update/) | Security | Hard | 20 min |
-| 31 | [Argo CD GitOps Setup](31-argocd-gitops-setup/) | Cluster Architecture | Hard | 25 min |
+| 30 | [TLS Configuration Update (supplemental application practice)](30-tls-configuration-update/) | Supplemental | Hard | 20 min |
+| 31 | [Argo CD GitOps Setup (supplemental product practice)](31-argocd-gitops-setup/) | Cluster Architecture | Hard | 25 min |
+| 32 | [Service Endpoints Troubleshooting](32-service-endpoints-troubleshooting/) | Services & Networking | Medium | 15 min |
 
 | Domain | Weight | Exercises |
 |---|---|---|
 | Troubleshooting | 30% | 11, 17, 29 |
-| Cluster Architecture | 25% | 04, 08, 09, 13, 14, 18, 20, 26, 31 |
-| Services & Networking | 20% | 05, 15, 19, 27, 28 |
-| Workloads & Scheduling | 15% | 01, 02, 03, 06, 07, 10, 16, 21, 22, 23, 24 |
+| Cluster Architecture | 25% | 04, 08, 09, 13, 14, 27 |
+| Services & Networking | 20% | 05, 15, 19, 28, 32 |
+| Workloads & Scheduling | 15% | 01, 02, 03, 06, 07, 10, 16, 20, 21, 22, 23, 24 |
 | Storage | 10% | 12, 25 |
 
 ## How to Use

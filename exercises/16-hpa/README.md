@@ -8,8 +8,6 @@ Configure a Horizontal Pod Autoscaler to scale a deployment based on CPU usage. 
 
 ## Context: HPA vs VPA
 
-## Context: HPA vs VPA
-
 HPA (Horizontal Pod Autoscaler) scales the number of replicas based on metrics like CPU or memory. When CPU exceeds target, HPA creates more pods. When load drops, it removes pods.
 
 VPA (Vertical Pod Autoscaler) adjusts the CPU and memory requests/limits for existing pods based on actual usage. If a pod requests 256Mi memory but only uses 64Mi, VPA recommends lowering the request. This doesn't scale replicas; it optimizes resource allocation to improve bin-packing and reduce waste.

@@ -151,13 +151,12 @@ Provide the commands to interact with the custom resource.
 **Time: 7 minutes**
 
 
-## Question 13: Pod Security Policy Bypass
+## Question 13: Enforce Pod Security Standards
 
-A pod in the `restricted` namespace requires elevated permissions (to run as root). Currently, Pod Security Standards enforce a restricted policy.
+Create a namespace named `restricted` and configure Pod Security Admission to enforce and warn on the `restricted` standard.
 
-1. Create an exception for this specific pod using pod-security.kubernetes.io labels
-2. Allow the pod to run with elevated privilege
-3. Verify other pods in the namespace still follow the restrictive policy
+1. Create a Pod named `restricted-pod` that complies with the `restricted` standard.
+2. Attempt to create a privileged Pod named `blocked-pod` in the same namespace. Confirm that the API server rejects it and returns a warning.
 
 **Time: 9 minutes**
 

@@ -287,7 +287,7 @@ Use this rubric to evaluate your work on each exercise. This helps you identify 
 - [ ] One scenario's root cause unclear
 - [ ] Didn't check all usual suspect files
 
-**Below 5:** Troubleshooting is 12% of exam. Practice log reading systematically.
+**Below 5:** Troubleshooting is 30% of the exam. Practice log reading systematically.
 
 ---
 
@@ -639,7 +639,7 @@ Use this rubric to evaluate your work on each exercise. This helps you identify 
 - [ ] Label selector mistakes discovered during testing
 - [ ] CNI concepts not encountered
 
-**Below 5:** NetworkPolicy is 13% of exam. Re-study bidirectional requirements and label matching.
+**Below 5:** NetworkPolicy is part of the 20% Services & Networking domain. Individual task weights vary. Re-study traffic direction and label matching.
 
 ---
 
@@ -664,7 +664,7 @@ Use this rubric to evaluate your work on each exercise. This helps you identify 
 - [ ] Certificate locations unclear
 - [ ] Didn't fully understand health implications
 
-**Below 5:** Troubleshooting is 12% of exam. Practice etcd troubleshooting commands.
+**Below 5:** Troubleshooting is 30% of the exam. Practice etcd troubleshooting commands.
 
 ---
 
@@ -718,12 +718,32 @@ Use this rubric to evaluate your work on each exercise. This helps you identify 
 
 ---
 
+### Exercise 32 — Service Endpoints Troubleshooting
+
+**9-10 (Mastered):**
+- [ ] Identified the Service selector mismatch
+- [ ] Corrected the selector without changing the Deployment
+- [ ] Confirmed both ready Pod IPs appear in the EndpointSlice
+- [ ] Verified Service DNS resolution and HTTP response
+
+**7-8 (Competent):**
+- [ ] Found and corrected the selector mismatch with a hint
+- [ ] Verified the EndpointSlice and HTTP response
+
+**5-6 (Partial):**
+- [ ] Found the Service or Pod label mismatch but needed help correcting it
+- [ ] Verified either the EndpointSlice or HTTP response, but not both
+
+**Below 5:** Review Service selectors, EndpointSlices, and the difference between having endpoints and having a working target port.
+
+---
+
 ## Overall Exam Readiness Score
 
 Sum your scores for each exercise (max 10 per exercise), then divide by number of exercises:
 
 ```
-Total Score = (Ex01 + Ex02 + ... + Ex31) / 31
+Total Score = (Ex01 + Ex02 + ... + Ex32) / 32
 ```
 
 | Overall Score | Exam Readiness |
@@ -743,6 +763,7 @@ If you score < 5 on ANY of these exercises, **focus there before mock exams:**
 - ✗ Exercise 12 (Storage/PVC) — 10% of exam, PVC behavior misunderstood is critical
 - ✗ Exercise 16 (HPA) — target.type confusion common
 - ✗ Exercise 28 (NetworkPolicy) — bidirectional requirements confuse many
+- ✗ Exercise 32 (Service endpoints) — selector and backend diagnosis need practice
 - ✗ Exercise 09 (kubeadm upgrade) — complex, high exam weight
 
 If stuck on these, spend time on them — don't rush to mock exams.

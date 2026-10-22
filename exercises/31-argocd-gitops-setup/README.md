@@ -1,5 +1,7 @@
 # Exercise 31 — Argo CD Setup (GitOps Deployment)
 
+> Supplemental product practice: Argo CD is not named in the current CKA curriculum. The exercise can still help practice CRDs and Kubernetes manifests; see the [official curriculum](https://github.com/cncf/curriculum/blob/master/CKA_Curriculum_v1.37.pdf) for exam scope.
+>
 > Related: [README — Deployments](../../README.md#domain-3--workloads--scheduling-15)
 
 Install Argo CD and configure it to deploy applications from a Git repository. Tests GitOps concepts and custom resource management.

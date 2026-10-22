@@ -600,50 +600,55 @@ k delete database --all
 
 ---
 
-## Solution 13: Pod Security Policy Bypass
+## Solution 13: Enforce Pod Security Standards
 
-Create an exception for a privileged pod using pod-security labels:
+Create the namespace and configure both enforcement and warning at the restricted level:
+```bash
+k create namespace restricted
+k label namespace restricted \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/warn=restricted
+```
 
-Option 1 — Pod-level exception:
+Create a compliant Pod:
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: privileged-pod
+  name: restricted-pod
   namespace: restricted
-  labels:
-    pod-security.kubernetes.io/exempt: 'true'
 spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
   containers:
-  - name: app
-    image: nginx
+  - name: pause
+    image: registry.k8s.io/pause:3.10
     securityContext:
-      privileged: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+        - ALL
 ```
-
-Option 2 — Exemption at pod level (if supported by PSS version):
 ```bash
-k label pod privileged-pod -n restricted pod-security.kubernetes.io/exempt=true
+k apply -f restricted-pod.yaml
+k get pod restricted-pod -n restricted
 ```
 
-Verify the pod runs with elevated privilege:
+Attempt to create a privileged Pod:
 ```bash
-k get pod privileged-pod -n restricted
-k exec privileged-pod -- id
+k run blocked-pod --image=nginx --restart=Never --privileged -n restricted
 ```
 
-Verify other pods still follow restrict policy:
-```bash
-k run normal-pod --image=nginx -n restricted
-# This pod should fail to start if it tries to be privileged
-```
-
-Check PSS labels on namespace:
+The API server rejects this Pod because it violates the enforced standard. The request also returns a warning because the namespace has the matching `warn` label. Verify the namespace labels with:
 ```bash
 k get namespace restricted --show-labels
 ```
 
-**Key insight:** Pod security exceptions are label-based. Only pods with the exemption label bypass the policy. Other pods continue to be enforced.
+**Key point:** Pod Security Admission policies are selected with namespace labels. Exemptions, when needed, are configured in the API server's admission configuration; there is no per-Pod `pod-security.kubernetes.io/exempt` label.
 
 ---
 

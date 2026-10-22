@@ -4,6 +4,11 @@ All notable changes to this CKA prep repo are documented here.
 
 Format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- Exercise 32: troubleshoot a Service selector mismatch using EndpointSlices, DNS, and HTTP verification.
+
 ---
 
 ## [1.1.0] — 2026-03-19
