@@ -55,7 +55,12 @@ NetworkPolicy assumes the Container Network Interface (CNI) is installed and wor
 ### Verify CNI is running
 
 ```bash
-# Check if CNI pods are deployed (usually in kube-system or calico-system)
+# Check if CNI pods are deployed:
+# - In standard/exam clusters: usually calico, flannel, or cilium
+# - In Kind clusters: kindnet
+k get pods -n kube-system -l app=kindnet   # For Kind
+k get pods -n kube-system | grep -E "kindnet|calico|flannel|cilium"
+k get pods -n calico-system               # For Calico operator
 k get pods -n kube-system | grep -i cni
 k get pods -n kube-system | grep -i calico
 k get pods -n calico-system
@@ -64,12 +69,16 @@ k get pods -n calico-system
 k get daemonset -n kube-system
 k get daemonset -n calico-system
 
-# Verify CNI configuration files exist on nodes
+# Verify CNI configuration files exist on nodes:
+# Option A: Real VM / Bare-metal / CKA Exam environment (uses SSH)
 ssh <node> ls -la /etc/cni/net.d/
 ssh <node> ls -la /opt/cni/bin/
-
-# Check kubelet is configured to use CNI
 ssh <node> cat /etc/kubernetes/kubelet.conf | grep cni
+
+# Option B: Local Kind cluster (nodes are Docker containers, no SSH daemon)
+docker exec <node-container-name> ls -la /etc/cni/net.d/
+docker exec <node-container-name> ls -la /opt/cni/bin/
+docker exec -it <node-container-name> bash
 ```
 
 ### Common CNI issues
