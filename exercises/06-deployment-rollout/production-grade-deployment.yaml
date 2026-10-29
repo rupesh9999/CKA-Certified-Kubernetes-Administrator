@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-production
+  namespace: exercise-06
+  labels:
+    app.kubernetes.io/name: webapp
+    app.kubernetes.io/tier: frontend
+spec:
+  replicas: 3
+  revisionHistoryLimit: 10
+  minReadySeconds: 5
+  progressDeadlineSeconds: 300
+  selector:
+    matchLabels:
+      app: webapp
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.29
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
