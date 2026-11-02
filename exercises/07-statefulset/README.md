@@ -169,7 +169,6 @@ k scale statefulset mysql --replicas=2
 ```
 
 </details>
-
 ---
 
 ## StatefulSet & Headless Service Architecture Deep Dive (English)
@@ -257,12 +256,31 @@ metadata:
   name: mysql-headless
   namespace: default
 spec:
-  clusterIP: None  # <-- Explicitly "None" triggers Headless behavior
+  clusterIP: None
   selector:
     app: mysql
   ports:
   - port: 3306
     name: mysql
+```
+
+#### Headless Service Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES service.yaml (HEADLESS) STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: v1 ──────────────────────────────────────────► Core Kubernetes API group for Service objects
+kind: Service ───────────────────────────────────────────► Declares resource type as a Kubernetes Service
+metadata:
+  name: mysql-headless ──────────────────────────────────► Service name (MUST match StatefulSet spec.serviceName)
+  namespace: default ────────────────────────────────────► Logical partition where the service is registered
+spec:
+  clusterIP: None ───────────────────────────────────────► CRITICAL: "None" suppresses virtual IP; turns service Headless
+  selector: ─────────────────────────────────────────────► Labels used to identify target pods for DNS routing
+    app: mysql ──────────────────────────────────────────► Matches pods with label "app: mysql"
+  ports: ────────────────────────────────────────────────► Network ports exposed by the headless service
+  - port: 3306 ──────────────────────────────────────────► Port number used by clients and peer replicas
+    name: mysql ─────────────────────────────────────────► Port identifier; required for SRV record generation
 ```
 
 #### The DNS Naming Contract: `hostname` and `subdomain`
@@ -287,7 +305,7 @@ By default, Kubernetes Services remove unready pods from their Endpoints.
 >
 > If `publishNotReadyAddresses: false` (the default), CoreDNS will **not return any DNS records** for `node-0`, `node-1`, or `node-2` because their readiness probes have not passed yet. The nodes cannot resolve each other's hostnames, so they cannot form a quorum, so their readiness probes never pass!
 >
-> To break this circular deadlock, set `publishNotReadyAddresses: true` on your Headless Service:
+> To break this circular deadlock, set `publishNotReadyAddresses: true` on your Headless Service.
 
 ```yaml
 apiVersion: v1
@@ -296,7 +314,7 @@ metadata:
   name: zookeeper-headless
 spec:
   clusterIP: None
-  publishNotReadyAddresses: true  # CRITICAL: Exposes DNS before readiness probes pass
+  publishNotReadyAddresses: true
   selector:
     app: zookeeper
   ports:
@@ -304,6 +322,27 @@ spec:
     name: peer
   - port: 3888
     name: leader-election
+```
+
+#### Quorum Headless Service Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES service.yaml (QUORUM BOOTSTRAP) STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: v1 ──────────────────────────────────────────► Core Kubernetes API group
+kind: Service ───────────────────────────────────────────► Declares resource type as a Kubernetes Service
+metadata:
+  name: zookeeper-headless ──────────────────────────────► Unique identifier for ZooKeeper peer network
+spec:
+  clusterIP: None ───────────────────────────────────────► Disables virtual IP for direct pod-to-pod routing
+  publishNotReadyAddresses: true ────────────────────────► CRITICAL: Publishes DNS A-records BEFORE pods are Ready!
+  selector: ─────────────────────────────────────────────► Pod label selector
+    app: zookeeper ──────────────────────────────────────► Selects all ZooKeeper consensus nodes
+  ports:
+  - port: 2888 ──────────────────────────────────────────► ZooKeeper quorum communication and peer sync port
+    name: peer ──────────────────────────────────────────► Named port for intra-cluster communication
+  - port: 3888 ──────────────────────────────────────────► ZooKeeper leader election protocol port
+    name: leader-election ───────────────────────────────► Named port for consensus voting
 ```
 
 ---
@@ -316,28 +355,100 @@ kind: StatefulSet
 metadata:
   name: database
 spec:
-  serviceName: "db-headless"                     # Mandatory: Links to Headless Service
-  replicas: 3                                    # Desired number of ordinal pods (0, 1, 2)
-  ordinals:                                      # k8s 1.27+ beta, 1.31+ GA
-    start: 0                                     # Starting ordinal index (can be non-zero!)
-  podManagementPolicy: OrderedReady              # OrderedReady (default) or Parallel
-  minReadySeconds: 10                            # Buffer time before progressing to next pod
-  revisionHistoryLimit: 10                       # Number of ControllerRevisions to keep
+  serviceName: "db-headless"
+  replicas: 3
+  ordinals:
+    start: 0
+  podManagementPolicy: OrderedReady
+  minReadySeconds: 10
+  revisionHistoryLimit: 10
   updateStrategy:
-    type: RollingUpdate                          # RollingUpdate (default) or OnDelete
+    type: RollingUpdate
     rollingUpdate:
-      partition: 0                               # Canary gate: only pods >= partition update
-      maxUnavailable: 1                          # k8s 1.24+: allows parallel rolling updates
-  persistentVolumeClaimRetentionPolicy:          # k8s 1.27+ GA: PVC lifecycle control
-    whenDeleted: Retain                          # Retain or Delete PVCs when STS is deleted
-    whenScaled: Delete                           # Retain or Delete PVCs when scaled down
+      partition: 0
+      maxUnavailable: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Delete
   selector:
     matchLabels:
       app: database
   template:
-    # Pod blueprint
+    metadata:
+      labels:
+        app: database
+    spec:
+      containers:
+      - name: db
+        image: postgres:16-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
   volumeClaimTemplates:
-    # Dedicated storage blueprint per replica
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 10Gi
+```
+
+#### Master StatefulSet Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES statefulset.yaml (MASTER SPECIFICATION) STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1 ─────────────────────────────────────► API group and version for StatefulSet workloads
+kind: StatefulSet ───────────────────────────────────────► Declares resource as a stateful controller
+metadata:
+  name: database ────────────────────────────────────────► Base name; generates pods: database-0, database-1...
+spec:
+  serviceName: "db-headless" ────────────────────────────► Name of the governing Headless Service for DNS routing
+  replicas: 3 ───────────────────────────────────────────► Desired number of ordinal pods (0, 1, 2)
+  ordinals: ─────────────────────────────────────────────► (k8s v1.27+ beta, v1.31+ GA) Ordinal index control
+    start: 0 ────────────────────────────────────────────► Starting ordinal number (can be non-zero for multi-cluster)
+  podManagementPolicy: OrderedReady ─────────────────────► OrderedReady (sequential: 0➔1➔2) or Parallel (concurrent)
+  minReadySeconds: 10 ───────────────────────────────────► Pod must remain Ready for 10s before rollout advances
+  revisionHistoryLimit: 10 ──────────────────────────────► Keeps 10 ControllerRevisions for rollback operations
+  updateStrategy: ───────────────────────────────────────► Rollout strategy configuration
+    type: RollingUpdate ─────────────────────────────────► Progressively updates pods in reverse order (2➔1➔0)
+    rollingUpdate:
+      partition: 0 ──────────────────────────────────────► Canary gate: only pods with ordinal >= partition update
+      maxUnavailable: 1 ─────────────────────────────────► (k8s 1.24+ beta/1.32+ GA) Max pods down during rollout
+  persistentVolumeClaimRetentionPolicy: ─────────────────► (k8s v1.27+ GA) Lifecycle control for dynamic PVCs
+    whenDeleted: Retain ─────────────────────────────────► Retain or Delete PVCs when StatefulSet is deleted
+    whenScaled: Delete ──────────────────────────────────► Delete or Retain PVCs when replicas decrease (scale down)
+  selector:
+    matchLabels:
+      app: database ─────────────────────────────────────► Label selector (IMMUTABLE after creation)
+  template: ─────────────────────────────────────────────► Pod blueprint for each ordinal replica
+    metadata:
+      labels:
+        app: database ───────────────────────────────────► Labels applied to each replica pod
+    spec:
+      containers: ───────────────────────────────────────► Container specifications running in each pod
+      - name: db ────────────────────────────────────────► Container name
+        image: postgres:16-alpine ───────────────────────► Container runtime image
+        ports:
+        - containerPort: 5432 ───────────────────────────► Port exposed internally by PostgreSQL
+          name: postgres ────────────────────────────────► Port name used for SRV discovery
+        volumeMounts: ───────────────────────────────────► Volume attachments inside the container
+        - name: data ────────────────────────────────────► Matches the name defined in volumeClaimTemplates
+          mountPath: /var/lib/postgresql/data ───────────► Mount target path inside the container filesystem
+  volumeClaimTemplates: ─────────────────────────────────► Dedicated storage blueprint generated for each ordinal
+  - metadata:
+      name: data ────────────────────────────────────────► Claim prefix: generates PVCs data-database-0, data-database-1...
+    spec:
+      accessModes: [ "ReadWriteOnce" ] ──────────────────► Single node read-write mount mode
+      storageClassName: standard ────────────────────────► Storage provider provisioner
+      resources:
+        requests:
+          storage: 10Gi ─────────────────────────────────► Dedicated disk capacity requested per pod
 ```
 
 #### Detailed Breakdown of Key Fields:
@@ -354,7 +465,7 @@ spec:
 
 #### B. `volumeClaimTemplates` (Dynamic Per-Pod Storage)
 Unlike a Deployment where all replicas mount the same PVC (which requires `ReadWriteMany` storage like NFS), a StatefulSet generates an independent PVC for each replica from the template:
-$$\text{PVC Name} = \langle\text{volumeClaimTemplate.name}\rangle-\langle\text{statefulset.name}\rangle-\langle\text{ordinal}\rangle$$
+$$	ext{PVC Name} = \langle	ext{volumeClaimTemplate.name}angle-\langle	ext{statefulset.name}angle-\langle	ext{ordinal}angle$$
 - Pod `mysql-0` mounts `data-mysql-0`.
 - Pod `mysql-1` mounts `data-mysql-1`.
 - If Pod `mysql-1` crashes, dies, or is rescheduled onto a different node, the new `mysql-1` pod **automatically re-attaches to `data-mysql-1`**, ensuring zero data loss.
@@ -505,7 +616,6 @@ spec:
         app: mysql
     spec:
       initContainers:
-      # Step A: Compute dynamic server-id and assign role based on ordinal
       - name: init-mysql
         image: mysql:8.0
         command:
@@ -513,15 +623,10 @@ spec:
         - -c
         - |
           set -ex
-          # Extract ordinal index from hostname (e.g., mysql-0 -> 0)
           [[ $(hostname) =~ -([0-9]+)$ ]] || exit 1
           ORDINAL=${BASH_REMATCH[1]}
-          
-          # Server ID must be unique in replication topology (100, 101, 102...)
           echo [mysqld] > /mnt/conf.d/server-id.cnf
           echo "server-id=$((100 + $ORDINAL))" >> /mnt/conf.d/server-id.cnf
-          
-          # Ordinal 0 is primary; others are read-only replicas
           if [[ $ORDINAL -eq 0 ]]; then
             cp /mnt/config-map/primary.cnf /mnt/conf.d/
           else
@@ -581,6 +686,148 @@ spec:
           storage: 10Gi
 ```
 
+#### MySQL Primary-Replica Architecture Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES mysql-configmap.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: v1 ──────────────────────────────────────────► Core Kubernetes API group
+kind: ConfigMap ─────────────────────────────────────────► Key-value configuration storage decoupled from containers
+metadata:
+  name: mysql-config ────────────────────────────────────► ConfigMap resource identifier
+  namespace: default ────────────────────────────────────► Namespace scope
+data:
+  primary.cnf: | ────────────────────────────────────────► Custom MySQL master server configuration
+    [mysqld]
+    log-bin=mysql-bin ───────────────────────────────────► Enables binary logging (mandatory for master replication)
+    innodb_flush_log_at_trx_commit=1 ────────────────────► ACID guarantee: flushes transaction logs to disk on commit
+    sync_binlog=1 ───────────────────────────────────────► Flushes binary log to disk after every transaction
+  replica.cnf: | ────────────────────────────────────────► Custom MySQL replica configuration
+    [mysqld]
+    super-read-only=1 ───────────────────────────────────► Prevents accidental write queries on read-only replicas
+```
+
+```text
+KUBERNETES mysql-routing-services.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+# 1. HEADLESS SERVICE (Internal Replication Channel)
+apiVersion: v1 ──────────────────────────────────────────► API version for core Service
+kind: Service ───────────────────────────────────────────► Resource type
+metadata:
+  name: mysql-headless ──────────────────────────────────► Matches StatefulSet spec.serviceName exactly
+spec:
+  clusterIP: None ───────────────────────────────────────► Headless: returns direct Pod IPs for peer-to-peer sync
+  selector:
+    app: mysql ──────────────────────────────────────────► Selects all MySQL pods (mysql-0, mysql-1, mysql-2)
+  ports:
+  - port: 3306 ──────────────────────────────────────────► Standard MySQL database port
+    name: mysql ─────────────────────────────────────────► Port name for DNS SRV records
+
+# 2. WRITE SERVICE (Points Exclusively to Primary)
+apiVersion: v1 ──────────────────────────────────────────► API version
+kind: Service ───────────────────────────────────────────► Resource type
+metadata:
+  name: mysql-primary ───────────────────────────────────► Target endpoint for backend application write queries
+spec:
+  type: ClusterIP ───────────────────────────────────────► Allocates virtual stable IP
+  selector:
+    app: mysql ──────────────────────────────────────────► Targets MySQL instances
+    role: primary ───────────────────────────────────────► CRITICAL: Routes traffic ONLY to Primary pod (mysql-0)
+  ports:
+  - port: 3306 ──────────────────────────────────────────► Client connection port
+    targetPort: 3306 ────────────────────────────────────► Container destination port
+
+# 3. READ SERVICE (Load Balances Across All Healthy Nodes)
+apiVersion: v1 ──────────────────────────────────────────► API version
+kind: Service ───────────────────────────────────────────► Resource type
+metadata:
+  name: mysql-read ──────────────────────────────────────► Target endpoint for read-only analytical and API queries
+spec:
+  type: ClusterIP ───────────────────────────────────────► Allocates virtual load-balancing IP
+  selector:
+    app: mysql ──────────────────────────────────────────► Distributes read queries across mysql-0, mysql-1, mysql-2
+  ports:
+  - port: 3306 ──────────────────────────────────────────► Client connection port
+    targetPort: 3306 ────────────────────────────────────► Container destination port
+```
+
+```text
+KUBERNETES mysql-statefulset.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1 ─────────────────────────────────────► API group for StatefulSet controller
+kind: StatefulSet ───────────────────────────────────────► Declares resource as StatefulSet
+metadata:
+  name: mysql ───────────────────────────────────────────► StatefulSet identifier (pods: mysql-0, mysql-1, mysql-2)
+spec:
+  serviceName: mysql-headless ───────────────────────────► Governing Headless Service for peer discovery DNS
+  replicas: 3 ───────────────────────────────────────────► 1 Primary + 2 Read Replicas
+  podManagementPolicy: OrderedReady ─────────────────────► Bootstraps mysql-0 before initializing replicas
+  selector:
+    matchLabels:
+      app: mysql ────────────────────────────────────────► Identifies managed pods
+  template:
+    metadata:
+      labels:
+        app: mysql ──────────────────────────────────────► Base application label
+    spec:
+      initContainers: ───────────────────────────────────► Pre-startup configuration generator
+      - name: init-mysql ────────────────────────────────► Name of the initialization container
+        image: mysql:8.0 ────────────────────────────────► Uses same MySQL image to leverage bash utilities
+        command: ["bash", "-c", "..."] ──────────────────► Script: extracts ordinal index from hostname
+                                                          # Assigns unique server-id: 100 + ORDINAL
+                                                          # Copies primary.cnf if ordinal 0, else replica.cnf
+        volumeMounts:
+        - name: conf ────────────────────────────────────► Mounts ephemeral directory for generated configuration
+          mountPath: /mnt/conf.d ────────────────────────► Destination path in init container
+        - name: config-map ──────────────────────────────► Mounts template configs from ConfigMap
+          mountPath: /mnt/config-map ────────────────────► Read-only source directory
+      containers:
+      - name: mysql ─────────────────────────────────────► Main database engine container
+        image: mysql:8.0 ────────────────────────────────► Enterprise MySQL server image
+        env:
+        - name: MYSQL_ROOT_PASSWORD ─────────────────────► Database root password
+          value: "ClusterAdminSecr3t!" ──────────────────► In production, inject from a Kubernetes Secret!
+        ports:
+        - containerPort: 3306 ───────────────────────────► Container port listening for SQL queries
+          name: mysql ───────────────────────────────────► Named port
+        volumeMounts:
+        - name: data ────────────────────────────────────► Persistent storage claim
+          mountPath: /var/lib/mysql ─────────────────────► Official MySQL database data directory
+        - name: conf ────────────────────────────────────► Configuration directory generated by initContainer
+          mountPath: /etc/mysql/conf.d ──────────────────► MySQL configuration include directory
+        resources:
+          requests:
+            cpu: 250m ───────────────────────────────────► Guaranteed 0.25 vCPU allocated to container
+            memory: 512Mi ───────────────────────────────► Guaranteed 512MiB RAM allocated
+          limits:
+            cpu: 1000m ──────────────────────────────────► Throttles container at 1 full vCPU
+            memory: 1Gi ─────────────────────────────────► OOMKills container if memory exceeds 1GiB
+        livenessProbe: ──────────────────────────────────► Restarts container if MySQL daemon deadlocks
+          exec:
+            command: ["mysqladmin", "ping", "..."] ──────► Executes ping command via CLI
+          initialDelaySeconds: 30 ───────────────────────► Waits 30s for database engine to start up
+          periodSeconds: 10 ─────────────────────────────► Checks health every 10 seconds
+        readinessProbe: ─────────────────────────────────► Removes pod from Service if database cannot accept queries
+          exec:
+            command: ["mysql", "-e", "SELECT 1"] ────────► Verifies database engine can execute SQL queries
+          initialDelaySeconds: 15 ───────────────────────► Begins checking 15s after container starts
+          periodSeconds: 5 ──────────────────────────────► Polls readiness every 5 seconds
+      volumes:
+      - name: conf ──────────────────────────────────────► Ephemeral scratch space shared between init and main container
+        emptyDir: {} ────────────────────────────────────► Wiped when pod terminates; recreated on startup
+      - name: config-map ────────────────────────────────► Mounts Kubernetes ConfigMap as a directory
+        configMap:
+          name: mysql-config ────────────────────────────► References ConfigMap created earlier
+  volumeClaimTemplates: ─────────────────────────────────► Dynamic disk generation per replica pod
+  - metadata:
+      name: data ────────────────────────────────────────► Generates PVCs: data-mysql-0, data-mysql-1, data-mysql-2
+    spec:
+      accessModes: [ "ReadWriteOnce" ] ──────────────────► Mountable as read/write by a single worker node
+      resources:
+        requests:
+          storage: 10Gi ─────────────────────────────────► Allocates 10GiB persistent block storage per pod
+```
+
 ---
 
 ### Scenario 2: Distributed Quorum & Consensus Cluster (ZooKeeper / Kafka / etcd)
@@ -600,7 +847,7 @@ metadata:
   namespace: default
 spec:
   clusterIP: None
-  publishNotReadyAddresses: true  # CRITICAL: Allows peer handshake prior to readiness
+  publishNotReadyAddresses: true
   selector:
     app: zookeeper
   ports:
@@ -619,7 +866,7 @@ metadata:
 spec:
   serviceName: zk-headless
   replicas: 3
-  podManagementPolicy: Parallel   # ZooKeeper nodes handle their own quorum sync
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: zookeeper
@@ -629,7 +876,6 @@ spec:
         app: zookeeper
     spec:
       affinity:
-        # High Availability: Ensure replicas are distributed across distinct physical nodes
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
@@ -645,7 +891,6 @@ spec:
         - sh
         - -c
         - |
-          # Calculate myid: zk-0 -> 1, zk-1 -> 2, zk-2 -> 3
           ORDINAL=$(hostname | awk -F'-' '{print $NF}')
           echo "$((ORDINAL + 1))" > /data/myid
         volumeMounts:
@@ -691,6 +936,81 @@ spec:
       resources:
         requests:
           storage: 5Gi
+```
+
+#### ZooKeeper Quorum Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES zookeeper.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+# HEADLESS PEER SERVICE
+apiVersion: v1 ──────────────────────────────────────────► Core Kubernetes API
+kind: Service ───────────────────────────────────────────► Declares resource as Service
+metadata:
+  name: zk-headless ─────────────────────────────────────► Headless service name matching StatefulSet spec.serviceName
+spec:
+  clusterIP: None ───────────────────────────────────────► Suppresses ClusterIP for direct peer routing
+  publishNotReadyAddresses: true ────────────────────────► CRITICAL: Resolves peer hostnames before cluster quorum forms!
+  selector:
+    app: zookeeper ──────────────────────────────────────► Selects ZooKeeper nodes
+  ports:
+  - port: 2888 ──────────────────────────────────────────► Peer synchronization port
+    name: peer ──────────────────────────────────────────► Named port
+  - port: 3888 ──────────────────────────────────────────► Leader election port
+    name: leader-election ───────────────────────────────► Named port
+  - port: 2181 ──────────────────────────────────────────► Client connection port
+    name: client ────────────────────────────────────────► Named port
+
+# STATEFULSET CONSENSUS CLUSTER
+apiVersion: apps/v1 ─────────────────────────────────────► Workloads API group
+kind: StatefulSet ───────────────────────────────────────► Manages ordinal replicas
+metadata:
+  name: zk ──────────────────────────────────────────────► Base name (generates zk-0, zk-1, zk-2)
+spec:
+  serviceName: zk-headless ──────────────────────────────► Links to Headless Service for DNS hostname creation
+  replicas: 3 ───────────────────────────────────────────► Odd number for 2N+1 quorum consensus
+  podManagementPolicy: Parallel ─────────────────────────► Starts all nodes simultaneously; quorum syncs over network
+  selector:
+    matchLabels:
+      app: zookeeper ────────────────────────────────────► Pod label selector
+  template:
+    metadata:
+      labels:
+        app: zookeeper ──────────────────────────────────► Pod label
+    spec:
+      affinity:
+        podAntiAffinity: ────────────────────────────────► Anti-Affinity rules
+          requiredDuringSchedulingIgnoredDuringExecution: ► HARD RULE: Pod will NOT schedule if condition is violated
+          - labelSelector:
+              matchExpressions:
+              - key: app ────────────────────────────────► Matches app=zookeeper
+                operator: In
+                values: ["zookeeper"]
+            topologyKey: "kubernetes.io/hostname" ───────► CRITICAL: Enforces 1 ZooKeeper pod per physical worker node!
+      initContainers:
+      - name: init-myid ─────────────────────────────────► Generates ZooKeeper server identifier
+        image: busybox:1.37 ─────────────────────────────► Lightweight utility container
+        command: ["sh", "-c", "..."] ──────────────────► Script: calculates myid = ORDINAL + 1 (zk-0 ➔ 1, zk-1 ➔ 2...)
+        volumeMounts:
+        - name: zk-data ─────────────────────────────────► Mounts persistent storage
+          mountPath: /data ──────────────────────────────► Writes /data/myid
+      containers:
+      - name: zookeeper ─────────────────────────────────► Main ZooKeeper engine
+        image: zookeeper:3.9.2 ──────────────────────────► Apache ZooKeeper official image
+        env:
+        - name: ZOO_SERVERS ─────────────────────────────► Dynamic peer cluster connection string using Headless DNS
+          value: "server.1=zk-0.zk-headless:2888:3888;2181..."
+        volumeMounts:
+        - name: zk-data ─────────────────────────────────► Mounts dedicated disk
+          mountPath: /data ──────────────────────────────► ZooKeeper transaction log and snapshot directory
+  volumeClaimTemplates:
+  - metadata:
+      name: zk-data ─────────────────────────────────────► Generates zk-data-zk-0, zk-data-zk-1, zk-data-zk-2
+    spec:
+      accessModes: [ "ReadWriteOnce" ] ──────────────────► RWO block storage
+      resources:
+        requests:
+          storage: 5Gi ──────────────────────────────────► 5GiB dedicated disk space per quorum member
 ```
 
 ---
@@ -740,7 +1060,7 @@ metadata:
 spec:
   serviceName: es-transport
   replicas: 3
-  podManagementPolicy: Parallel  # CRITICAL: Rapid concurrent initialization
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: elasticsearch
@@ -749,7 +1069,7 @@ spec:
       labels:
         app: elasticsearch
     spec:
-      terminationGracePeriodSeconds: 120  # Allow 2 minutes for memory buffer flush
+      terminationGracePeriodSeconds: 120
       containers:
       - name: elasticsearch
         image: elasticsearch:8.15.0
@@ -765,7 +1085,6 @@ spec:
               - sh
               - -c
               - |
-                # Gracefully flush dirty in-memory pages to persistent storage before SIGTERM
                 curl -X POST "http://localhost:9200/_flush/synced" || true
         volumeMounts:
         - name: storage
@@ -780,6 +1099,53 @@ spec:
           storage: 50Gi
 ```
 
+#### Elasticsearch Parallel Store Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES elasticsearch-data.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1 ─────────────────────────────────────► API group for workloads
+kind: StatefulSet ───────────────────────────────────────► Manages stateful Elasticsearch data shards
+metadata:
+  name: es-data ─────────────────────────────────────────► Base name (generates es-data-0, es-data-1, es-data-2)
+spec:
+  serviceName: es-transport ─────────────────────────────► Headless service name for internal transport communication
+  replicas: 3 ───────────────────────────────────────────► 3 data nodes
+  podManagementPolicy: Parallel ─────────────────────────► CRITICAL: Boots or stops all pods simultaneously without waiting!
+  selector:
+    matchLabels:
+      app: elasticsearch ────────────────────────────────► Matches target pods
+  template:
+    metadata:
+      labels:
+        app: elasticsearch ──────────────────────────────► Pod label
+    spec:
+      terminationGracePeriodSeconds: 120 ────────────────► CRITICAL: Gives container 2 minutes to flush dirty pages on shutdown
+      containers:
+      - name: elasticsearch ─────────────────────────────► Main search engine container
+        image: elasticsearch:8.15.0 ─────────────────────► Elasticsearch binary image
+        ports:
+        - containerPort: 9200 ───────────────────────────► REST API port
+          name: http ────────────────────────────────────► Named port
+        - containerPort: 9300 ───────────────────────────► Inter-node cluster communication port
+          name: transport ───────────────────────────────► Named port
+        lifecycle:
+          preStop: ──────────────────────────────────────► Graceful shutdown hook executed BEFORE container receives SIGTERM
+            exec:
+              command: ["sh", "-c", "..."] ─────────────► Flushes in-memory indexes to disk before pod stops
+        volumeMounts:
+        - name: storage ─────────────────────────────────► Mounted PVC
+          mountPath: /usr/share/elasticsearch/data ──────► Target persistent directory for Lucene index files
+  volumeClaimTemplates:
+  - metadata:
+      name: storage ─────────────────────────────────────► Generates PVCs: storage-es-data-0, storage-es-data-1...
+    spec:
+      accessModes: [ "ReadWriteOnce" ] ──────────────────► Single node read-write mode
+      resources:
+        requests:
+          storage: 50Gi ─────────────────────────────────► 50GiB disk per node
+```
+
 ---
 
 ### Scenario 4: Phased Canary Rolling Upgrades with `partition: N`
@@ -787,7 +1153,7 @@ spec:
 Updating stateful databases with standard rolling updates poses high risk. If a new schema or binary has a subtle bug, an automatic rollout could update all nodes sequentially, corrupting the entire cluster before engineers can intervene.
 
 The `partition` parameter provides a declarative **Canary Gate**:
-$$\text{Update Condition: A pod is updated if and only if: } \text{Ordinal} \ge \text{partition}$$
+$$	ext{Update Condition: A pod is updated if and only if: } 	ext{Ordinal} \ge 	ext{partition}$$
 
 ```mermaid
 flowchart TD
@@ -828,16 +1194,45 @@ flowchart TD
     PhasedStage -->|"Confirm quorum stability"| CompleteStage
 ```
 
+#### Canary Rolling Update Specification (`canary-partition.yaml`):
+
+```yaml
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 4
+  template:
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.4
+```
+
+#### Canary Rollout Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES canary-partition.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+spec:
+  updateStrategy: ───────────────────────────────────────► StatefulSet rollout strategy definition
+    type: RollingUpdate ─────────────────────────────────► Default progressive rolling update strategy
+    rollingUpdate:
+      partition: 4 ──────────────────────────────────────► CRITICAL: Only pods with ordinal index >= 4 are updated!
+                                                          # In a 5-replica cluster (0..4), ONLY pod-4 updates.
+                                                          # Pods 0, 1, 2, 3 remain strictly on the old version.
+  template:
+    spec:
+      containers:
+      - name: redis ─────────────────────────────────────► Target container
+        image: redis:7.4 ────────────────────────────────► New canary container image being validated
+```
+
 #### Step-by-Step Canary Upgrade Procedure:
 
 1. **Inspect current 5-replica StatefulSet running `redis:7.2`**:
    ```bash
    kubectl get pods -l app=redis -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[0].image
-   # redis-0 -> redis:7.2
-   # redis-1 -> redis:7.2
-   # redis-2 -> redis:7.2
-   # redis-3 -> redis:7.2
-   # redis-4 -> redis:7.2
    ```
 
 2. **Trigger Canary on Pod `redis-4` only (`partition: 4`)**:
@@ -847,7 +1242,6 @@ flowchart TD
      {"op": "replace", "path": "/spec/template/spec/containers/0/image", "value": "redis:7.4"}
    ]'
    ```
-   *Behavior*: The controller terminates only `redis-4` and brings it up on `redis:7.4`. Pods `0, 1, 2, 3` remain untouched on `redis:7.2`.
 
 3. **Verify Canary Health & Telemetry**:
    Monitor logs, latency, and query errors on `redis-4.redis-headless`.
@@ -858,7 +1252,6 @@ flowchart TD
      {"op": "replace", "path": "/spec/updateStrategy/rollingUpdate/partition", "value": 2}
    ]'
    ```
-   *Behavior*: Pods `redis-3` and `redis-2` are sequentially updated in reverse order (`3` then `2`).
 
 5. **Complete Full Rollout (`partition: 0`)**:
    ```bash
@@ -866,7 +1259,6 @@ flowchart TD
      {"op": "replace", "path": "/spec/updateStrategy/rollingUpdate/partition", "value": 0}
    ]'
    ```
-   *Behavior*: `redis-1` and `redis-0` update. The entire cluster is now running `redis:7.4`.
 
 ---
 
@@ -883,10 +1275,9 @@ metadata:
 spec:
   serviceName: cache-headless
   replicas: 5
-  # Declarative cleanup configuration:
   persistentVolumeClaimRetentionPolicy:
-    whenDeleted: Retain  # If StatefulSet is deleted, RETAIN data for safety
-    whenScaled: Delete   # If replicas decrease, DELETE unneeded PVCs to stop billing
+    whenDeleted: Retain
+    whenScaled: Delete
   selector:
     matchLabels:
       app: cache
@@ -912,9 +1303,45 @@ spec:
           storage: 20Gi
 ```
 
-#### How Kubernetes Evaluates Retention:
-- **`whenScaled: Delete`**: When you run `kubectl scale statefulset cache-node --replicas=3`, pods `cache-node-4` and `cache-node-3` are terminated. As soon as each pod completes termination, the StatefulSet controller issues a garbage collection call to delete `appendonly-cache-node-4` and `appendonly-cache-node-3`.
-- **`whenDeleted: Retain`**: If someone executes `kubectl delete statefulset cache-node`, the pods terminate, but the remaining PVCs (`appendonly-cache-node-0`, `1`, `2`) are preserved intact.
+#### PVC Retention Policy Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES pvc-retention-policy.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1 ─────────────────────────────────────► Apps API group
+kind: StatefulSet ───────────────────────────────────────► Resource kind
+metadata:
+  name: cache-node ──────────────────────────────────────► Name of StatefulSet
+spec:
+  serviceName: cache-headless ───────────────────────────► Headless service name
+  replicas: 5 ───────────────────────────────────────────► 5 cache replicas
+  persistentVolumeClaimRetentionPolicy: ─────────────────► (k8s v1.27+ GA) Automatic disk cleanup rules
+    whenDeleted: Retain ─────────────────────────────────► SAFETY: Keeps PVCs intact if entire StatefulSet is deleted
+    whenScaled: Delete ──────────────────────────────────► COST OPTIMIZATION: Auto-deletes PVCs when scaled down (e.g. 5➔2)
+  selector:
+    matchLabels:
+      app: cache ────────────────────────────────────────► Pod label selector
+  template:
+    metadata:
+      labels:
+        app: cache
+    spec:
+      containers:
+      - name: redis ─────────────────────────────────────► Redis container
+        image: redis:7.4-alpine ─────────────────────────► In-memory key-value store
+        volumeMounts:
+        - name: appendonly ──────────────────────────────► Mounts persistent append-only file
+          mountPath: /data ──────────────────────────────► Redis persistence path
+  volumeClaimTemplates:
+  - metadata:
+      name: appendonly ──────────────────────────────────► Template name
+    spec:
+      accessModes: [ "ReadWriteOnce" ] ──────────────────► Single node block volume
+      storageClassName: standard ────────────────────────► Cloud default dynamic volume provisioner
+      resources:
+        requests:
+          storage: 20Gi ─────────────────────────────────► 20GiB per node
+```
 
 ---
 
@@ -964,7 +1391,7 @@ kind: StorageClass
 metadata:
   name: ebs-gp3-wait
 provisioner: ebs.csi.aws.com
-volumeBindingMode: WaitForFirstConsumer  # CRITICAL: Binds disk in the pod's assigned zone
+volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 parameters:
   type: gp3
@@ -987,7 +1414,7 @@ spec:
     spec:
       topologySpreadConstraints:
       - maxSkew: 1
-        topologyKey: "topology.kubernetes.io/zone"   # Spread across AZs
+        topologyKey: "topology.kubernetes.io/zone"
         whenUnsatisfiable: DoNotSchedule
         labelSelector:
           matchLabels:
@@ -1012,6 +1439,65 @@ spec:
       resources:
         requests:
           storage: 50Gi
+```
+
+#### Multi-AZ Topology Spread Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES storageclass.yaml (MULTI-AZ SAFE) STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: storage.k8s.io/v1 ───────────────────────────► Storage API group
+kind: StorageClass ──────────────────────────────────────► Defines dynamic storage provisioner rules
+metadata:
+  name: ebs-gp3-wait ────────────────────────────────────► Custom StorageClass name
+provisioner: ebs.csi.aws.com ────────────────────────────► AWS EBS Container Storage Interface (CSI) plugin
+volumeBindingMode: WaitForFirstConsumer ────────────────► CRITICAL: Delays EBS volume creation until Pod is scheduled!
+                                                          # Prevents creating EBS in us-east-1a while pod lands in us-east-1b
+allowVolumeExpansion: true ──────────────────────────────► Allows in-place PVC resizing without recreating volumes
+parameters:
+  type: gp3 ─────────────────────────────────────────────► AWS General Purpose SSD gp3
+```
+
+```text
+KUBERNETES cockroachdb-topology.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1 ─────────────────────────────────────► Apps API group
+kind: StatefulSet ───────────────────────────────────────► Workload controller
+metadata:
+  name: cockroachdb ─────────────────────────────────────► CockroachDB distributed database cluster
+spec:
+  serviceName: cockroachdb-headless ─────────────────────► Headless DNS service
+  replicas: 3 ───────────────────────────────────────────► 3 distributed SQL nodes
+  selector:
+    matchLabels:
+      app: cockroachdb ──────────────────────────────────► Pod selector
+  template:
+    metadata:
+      labels:
+        app: cockroachdb
+    spec:
+      topologySpreadConstraints: ────────────────────────► Zone balancing configuration
+      - maxSkew: 1 ──────────────────────────────────────► Max difference in replica count between zones is 1
+        topologyKey: "topology.kubernetes.io/zone" ──────► Balances pods across AWS/GCP Availability Zones
+        whenUnsatisfiable: DoNotSchedule ────────────────► HARD RULE: Do not place pods if zone balance cannot be maintained
+        labelSelector:
+          matchLabels:
+            app: cockroachdb ────────────────────────────► Identifies pods to distribute
+      containers:
+      - name: cockroachdb ───────────────────────────────► Distributed SQL engine
+        image: cockroachdb/cockroach:v24.1.0 ────────────► CockroachDB binary
+        volumeMounts:
+        - name: datadir ─────────────────────────────────► Mounted volume
+          mountPath: /cockroach/cockroach-data ──────────► Data directory
+  volumeClaimTemplates:
+  - metadata:
+      name: datadir ─────────────────────────────────────► PVC template prefix
+    spec:
+      accessModes: [ "ReadWriteOnce" ] ──────────────────► RWO mode
+      storageClassName: ebs-gp3-wait ────────────────────► Uses WaitForFirstConsumer StorageClass!
+      resources:
+        requests:
+          storage: 50Gi ─────────────────────────────────► 50GiB per database node
 ```
 
 ---
@@ -1062,13 +1548,28 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 999                     # postgres user UID
-        fsGroup: 999                       # Automatically chowns volume to GID 999
-        fsGroupChangePolicy: "OnRootMismatch"  # Skips chown if root directory is already correct
+        runAsUser: 999
+        fsGroup: 999
+        fsGroupChangePolicy: "OnRootMismatch"
 ```
-> [!TIP]
-> **Why `fsGroupChangePolicy: "OnRootMismatch"` is Crucial in Production**:
-> On multi-terabyte database volumes containing millions of files, Kubernetes' default behavior is to recursively `chown` every single file on disk during pod startup. This can delay pod boot by **15 to 45 minutes**, causing liveness probes to fail and creating endless CrashLoopBackOff loops! `OnRootMismatch` checks only the root directory, allowing instant container startup.
+
+#### SecurityContext Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES securitycontext.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+spec:
+  template:
+    spec:
+      securityContext: ──────────────────────────────────► Pod-level security configuration
+        runAsNonRoot: true ──────────────────────────────► HARD CHECK: Blocks container if image attempts to run as root
+        runAsUser: 999 ──────────────────────────────────► Runs container processes as user ID 999 (e.g. postgres)
+        fsGroup: 999 ────────────────────────────────────► CRITICAL: Modifies volume group ownership to GID 999
+                                                          # Allows non-root postgres user to read/write to /var/lib/postgresql/data
+        fsGroupChangePolicy: "OnRootMismatch" ───────────► PRODUCTION OPTIMIZATION:
+                                                          # Only performs chown if root directory GID does not match 999.
+                                                          # Bypasses recursive chown on millions of files, saving 30+ minutes on boot!
+```
 
 ---
 
@@ -1104,7 +1605,46 @@ kind: StorageClass
 metadata:
   name: local-nvme
 provisioner: kubernetes.io/no-provisioner
-volumeBindingMode: WaitForFirstConsumer  # Mandatory for Local PVs
+volumeBindingMode: WaitForFirstConsumer
+```
+
+#### Local Persistent Volume Structure Breakdown (Visual Annotated Format):
+
+```text
+KUBERNETES local-pv.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: v1 ──────────────────────────────────────────► Core API group
+kind: PersistentVolume ──────────────────────────────────► Cluster-level storage resource
+metadata:
+  name: local-nvme-node1 ────────────────────────────────► Name of the physical local volume
+spec:
+  capacity:
+    storage: 500Gi ──────────────────────────────────────► Total capacity of local NVMe partition
+  accessModes:
+  - ReadWriteOnce ───────────────────────────────────────► Single node mount mode
+  persistentVolumeReclaimPolicy: Retain ─────────────────► Keeps local data on disk after PVC is deleted
+  storageClassName: local-nvme ──────────────────────────► Custom storage class for local drives
+  local: ────────────────────────────────────────────────► Defines physical storage type as local disk
+    path: /mnt/disks/ssd0 ───────────────────────────────► Host filesystem path where NVMe drive is mounted
+  nodeAffinity: ─────────────────────────────────────────► CRITICAL: Pinpoints physical worker node hosting this SSD
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname ───────────────────► Hostname label
+          operator: In
+          values:
+          - worker-node-01 ──────────────────────────────► Disk is physically located on worker-node-01
+```
+
+```text
+KUBERNETES local-storageclass.yaml STRUCTURE BREAKDOWN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: storage.k8s.io/v1 ───────────────────────────► Storage API
+kind: StorageClass ──────────────────────────────────────► Storage class resource
+metadata:
+  name: local-nvme ──────────────────────────────────────► Matches PV storageClassName
+provisioner: kubernetes.io/no-provisioner ───────────────► Disables automated cloud dynamic provisioning
+volumeBindingMode: WaitForFirstConsumer ────────────────► CRITICAL: Delays binding until Pod is scheduled to matching node
 ```
 
 ---
@@ -1193,8 +1733,7 @@ kubectl get pvc -l app=<label> -o custom-columns=NAME:.metadata.name,STATUS:.sta
 kubectl get controllerrevisions -l app=<label>
 
 # 5. Check DNS resolution and SRV records from a debug container:
-kubectl run dns-debug --image=tianon/toybox --rm -it --restart=Never -- \
-  dig SRV _mysql._tcp.mysql-headless.default.svc.cluster.local
+kubectl run dns-debug --image=tianon/toybox --rm -it --restart=Never --   dig SRV _mysql._tcp.mysql-headless.default.svc.cluster.local
 
 # 6. Watch ordered rollout progress:
 kubectl rollout status statefulset/<name>
@@ -1257,7 +1796,7 @@ kubectl delete statefulset <name> --cascade=orphan
 - క్లస్టర్ నోడ్స్ తమలో తాము ఓట్లు వేసుకోవడానికి (Quorum/Leader Election) ఒకదానితో ఒకటి నేరుగా మాట్లాడుకోవాలి.
 
 అందుకే `clusterIP: None` అని పెట్టి హెడ్‌లెస్ సర్వీస్ తయారుచేస్తారు. దీనివల్ల CoreDNS ప్రతి Pod కి ఒక స్థిరమైన DNS చిరునామాను ఇస్తుంది:
-$$\text{DNS}: \text{mysql-0}.\text{mysql-headless}.\text{default}.\text{svc}.\text{cluster}.\text{local}$$
+$$	ext{DNS}: 	ext{mysql-0}.	ext{mysql-headless}.	ext{default}.	ext{svc}.	ext{cluster}.	ext{local}$$
 
 > [!IMPORTANT]
 > StatefulSet లోని `spec.serviceName` మరియు Headless Service యొక్క `metadata.name` రెండూ **ఖచ్చితంగా ఒకే పేరుతో** ఉండాలి. లేదంటే Pods కి DNS పేర్లు రావు.
