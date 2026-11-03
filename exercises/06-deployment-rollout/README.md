@@ -94,6 +94,39 @@ spec:
         image: nginx:1.28
 ```
 
+#### YAML Structure Breakdown:
+```text
+==============================================================================================
+                       KUBERNETES deploy.yaml STRUCTURE BREAKDOWN
+==============================================================================================
+apiVersion: apps/v1 ───────────────────────────────> Kubernetes API group & version for Deployments
+kind: Deployment ──────────────────────────────────> Workload controller managing ReplicaSets and Pods
+metadata: ─────────────────────────────────────────> Metadata describing this specific Deployment object
+  name: webapp ────────────────────────────────────> Unique Deployment name within the target namespace
+  namespace: exercise-06 ──────────────────────────> Logical namespace boundary isolating this workload
+
+spec: ─────────────────────────────────────────────> Specification defining desired cluster state
+  replicas: 3 ─────────────────────────────────────> Desired number of identical running Pod instances
+  selector: ───────────────────────────────────────> Tells Deployment which Pods belong to its control
+    matchLabels: ──────────────────────────────────> Label query used to match against Pod template labels
+      app: webapp ─────────────────────────────────> Must match spec.template.metadata.labels exactly!
+
+  strategy: ───────────────────────────────────────> Rules for replacing existing Pods during updates
+    type: RollingUpdate ───────────────────────────> Gradually replaces old pods with new ones (no downtime)
+    rollingUpdate: ────────────────────────────────> Fine-tuning parameters for the rolling update
+      maxSurge: 1 ─────────────────────────────────> Allow max 1 extra Pod above replica count (3+1=4)
+      maxUnavailable: 0 ───────────────────────────> 0 pods can be down; maintains 100% capacity (min 3 pods)
+
+  template: ───────────────────────────────────────> Pod blueprint used by ReplicaSet to spawn each pod
+    metadata: ─────────────────────────────────────> Metadata applied directly to each generated Pod
+      labels: ─────────────────────────────────────> Key-value tags assigned to every spawned Pod
+        app: webapp ───────────────────────────────> MUST match spec.selector.matchLabels exactly!
+    spec: ─────────────────────────────────────────> Pod specification defining containers & volumes
+      containers: ─────────────────────────────────> List of containers running together inside the Pod
+      - name: nginx ───────────────────────────────> Container identifier within the Pod
+        image: nginx:1.28 ─────────────────────────> Container image pulled from container registry
+```
+
 ```bash
 k apply -f deploy.yaml
 # First annotation — no --overwrite needed because the key doesn't exist yet
@@ -233,6 +266,67 @@ spec:
           periodSeconds: 5
 ```
 
+#### Production Deployment YAML Structure Breakdown:
+```text
+=========================================================================================================
+                  KUBERNETES webapp-production.yaml STRUCTURE BREAKDOWN
+=========================================================================================================
+apiVersion: apps/v1 ─────────────────────────────────────> Core API group and version for workload controllers
+kind: Deployment ────────────────────────────────────────> Declares a declarative Deployment workload resource
+metadata: ───────────────────────────────────────────────> Object identity and organizational categorization
+  name: webapp-production ───────────────────────────────> Unique name for this production deployment
+  namespace: exercise-06 ────────────────────────────────> Namespace boundary where this resource is deployed
+  labels: ───────────────────────────────────────────────> Standard Kubernetes recommended labels for auditing
+    app.kubernetes.io/name: webapp ──────────────────────> Name of the application software
+    app.kubernetes.io/tier: frontend ────────────────────> Architectural tier of the application
+
+spec: ───────────────────────────────────────────────────> Full specifications of desired deployment behavior
+  replicas: 3 ───────────────────────────────────────────> Maintain exactly 3 running Pod instances at all times
+  revisionHistoryLimit: 10 ──────────────────────────────> Retain 10 historical ReplicaSets for rollback history
+  minReadySeconds: 5 ────────────────────────────────────> Newly created Pod must stay ready 5s before progressing
+  progressDeadlineSeconds: 300 ──────────────────────────> Wait 300s (5m) before marking rollout as failed/stalled
+  selector: ─────────────────────────────────────────────> Immutable selector mapping deployment to its pods
+    matchLabels: ────────────────────────────────────────> Key-value query matched against pod template labels
+      app: webapp ───────────────────────────────────────> Must match spec.template.metadata.labels exactly
+
+  strategy: ─────────────────────────────────────────────> Rolling update transition controls
+    type: RollingUpdate ─────────────────────────────────> Zero-downtime rolling update strategy
+    rollingUpdate: ──────────────────────────────────────> Mathematical bounds for rolling update speed
+      maxSurge: 1 ───────────────────────────────────────> Maximum pods above replica count allowed (3+1=4)
+      maxUnavailable: 0 ─────────────────────────────────> Minimum pods required available at all times (3-0=3)
+
+  template: ─────────────────────────────────────────────> Pod blueprint inherited by child ReplicaSets & Pods
+    metadata: ───────────────────────────────────────────> Pod-level metadata
+      labels: ───────────────────────────────────────────> Labels assigned to every generated Pod instance
+        app: webapp ─────────────────────────────────────> Required by selector.matchLabels for ownership tracking
+    spec: ───────────────────────────────────────────────> Detailed pod specification
+      containers: ───────────────────────────────────────> Array of container configurations inside the pod
+      - name: nginx ─────────────────────────────────────> Container name within the pod sandbox
+        image: nginx:1.28 ───────────────────────────────> OCI/Docker container image and version tag
+        ports: ──────────────────────────────────────────> Ports exposed by the container process
+        - containerPort: 80 ─────────────────────────────> Port number listened to inside the container
+          name: http ────────────────────────────────────> Named port reference usable by Services
+        resources: ──────────────────────────────────────> Resource QoS constraints (Burstable class)
+          requests: ─────────────────────────────────────> Minimum guaranteed resources scheduled on node
+            cpu: "100m" ─────────────────────────────────> 100 millicores (0.1 vCPU core guaranteed)
+            memory: "128Mi" ─────────────────────────────> 128 Mebibytes of RAM guaranteed
+          limits: ───────────────────────────────────────> Maximum ceiling before throttling / OOMKilled
+            cpu: "500m" ─────────────────────────────────> 500 millicores (0.5 vCPU max, throttled if exceeded)
+            memory: "256Mi" ─────────────────────────────> 256 Mebibytes max (container OOMKilled if exceeded)
+        livenessProbe: ──────────────────────────────────> Checks if container is alive (restarts if failed)
+          httpGet: ──────────────────────────────────────> HTTP GET probe action
+            path: / ─────────────────────────────────────> Health probe URL endpoint path
+            port: 80 ────────────────────────────────────> Port to probe against
+          initialDelaySeconds: 5 ────────────────────────> Wait 5s after start before probing
+          periodSeconds: 10 ─────────────────────────────> Probe interval: repeat test every 10 seconds
+        readinessProbe: ─────────────────────────────────> Checks if pod is ready to accept traffic via Service
+          httpGet: ──────────────────────────────────────> HTTP GET probe action
+            path: / ─────────────────────────────────────> Readiness endpoint path
+            port: 80 ────────────────────────────────────> Port to probe against
+          initialDelaySeconds: 2 ────────────────────────> Wait 2s before first readiness check
+          periodSeconds: 5 ──────────────────────────────> Repeat check every 5s; gates rollout progression
+```
+
 #### Fast Imperative Commands for CKA:
 ```bash
 # 1. Generate skeleton deployment YAML quickly:
@@ -297,6 +391,35 @@ spec:
         - containerPort: 80
 ```
 
+#### Recreate Deployment YAML Structure Breakdown:
+```text
+=========================================================================================================
+                     KUBERNETES legacy-app.yaml (RECREATE) STRUCTURE BREAKDOWN
+=========================================================================================================
+apiVersion: apps/v1 ─────────────────────────────────────> API group for workload controllers
+kind: Deployment ────────────────────────────────────────> Workload resource type: Deployment controller
+metadata: ───────────────────────────────────────────────> Object metadata
+  name: legacy-app ──────────────────────────────────────> Unique name for this legacy application
+  namespace: exercise-06 ────────────────────────────────> Namespace boundary for deployment
+spec: ───────────────────────────────────────────────────> Deployment specifications
+  replicas: 3 ───────────────────────────────────────────> Maintain exactly 3 pod replicas
+  selector: ─────────────────────────────────────────────> Pod selector query
+    matchLabels: ────────────────────────────────────────> Label matching criteria
+      app: legacy-app ───────────────────────────────────> Targets pods with label app=legacy-app
+  strategy: ─────────────────────────────────────────────> Defines update procedure
+    type: Recreate ──────────────────────────────────────> ALL old pods killed first, THEN new pods created (downtime!)
+  template: ─────────────────────────────────────────────> Blueprint for pod creation
+    metadata: ───────────────────────────────────────────> Pod metadata
+      labels: ───────────────────────────────────────────> Labels attached to each pod
+        app: legacy-app ─────────────────────────────────> Matches spec.selector.matchLabels exactly
+    spec: ───────────────────────────────────────────────> Pod specifications
+      containers: ───────────────────────────────────────> Containers running in each pod
+      - name: app ───────────────────────────────────────> Container name
+        image: nginx:1.28 ───────────────────────────────> Container image to execute
+        ports: ──────────────────────────────────────────> Exposed ports
+        - containerPort: 80 ─────────────────────────────> Port 80 exposed internally
+```
+
 ---
 
 ### 2. Rollout & Rollout Lifecycle
@@ -345,6 +468,19 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/restartedAt: "2026-10-27T14:15:00Z"
+```
+
+#### Rollout Restart Annotation Structure Breakdown:
+```text
+=========================================================================================================
+            KUBERNETES rollout restart ANNOTATION STRUCTURE BREAKDOWN
+=========================================================================================================
+spec: ───────────────────────────────────────────────────> Deployment workload specification
+  template: ─────────────────────────────────────────────> Pod template definition
+    metadata: ───────────────────────────────────────────> Pod template metadata
+      annotations: ──────────────────────────────────────> Non-identifying metadata attached to template
+        kubectl.kubernetes.io/restartedAt: ──────────────> Timestamp injected automatically by kubectl
+          "2026-10-27T14:15:00Z" ────────────────────────> Value triggers spec change -> causes zero-downtime rollout
 ```
 Because the Pod template has changed, the Deployment Controller treats it as a standard rollout and executes a zero-downtime rolling restart!
 
@@ -440,6 +576,16 @@ strategy:
     maxSurge: 1
     maxUnavailable: 0
 ```
+```text
+=========================================================================================================
+            SCENARIO A: ZERO DOWNTIME & MAXIMUM AVAILABILITY STRUCTURE BREAKDOWN
+=========================================================================================================
+strategy: ───────────────────────────────────────────────> Strategy definition block
+  type: RollingUpdate ───────────────────────────────────> Zero-downtime rolling update strategy
+  rollingUpdate: ────────────────────────────────────────> Rolling rate parameters
+    maxSurge: 1 ─────────────────────────────────────────> Allow 1 extra pod above replica count (3 + 1 = 4 max)
+    maxUnavailable: 0 ───────────────────────────────────> 0 pods can be unready; keeps 100% capacity (3 - 0 = 3 min)
+```
 * **With 3 desired replicas**:
   - Max total pods during rollout: $3 + 1 = 4$
   - Minimum available pods at all times: $3 - 0 = 3$
@@ -452,6 +598,16 @@ strategy:
   rollingUpdate:
     maxSurge: 0
     maxUnavailable: 1
+```
+```text
+=========================================================================================================
+            SCENARIO B: RESOURCE-CONSTRAINED CLUSTERS STRUCTURE BREAKDOWN
+=========================================================================================================
+strategy: ───────────────────────────────────────────────> Strategy definition block
+  type: RollingUpdate ───────────────────────────────────> Zero-downtime rolling update strategy
+  rollingUpdate: ────────────────────────────────────────> Rolling rate parameters
+    maxSurge: 0 ─────────────────────────────────────────> Cannot exceed desired replicas (strict cluster quota limit)
+    maxUnavailable: 1 ───────────────────────────────────> Terminates 1 old pod first to free resources before adding new
 ```
 * **With 3 desired replicas**:
   - Max total pods during rollout: $3 + 0 = 3$ (never exceeds cluster quota)
@@ -466,6 +622,16 @@ strategy:
     maxSurge: 50%
     maxUnavailable: 25%
 ```
+```text
+=========================================================================================================
+            SCENARIO C: RAPID HIGH-THROUGHPUT ROLLOUT STRUCTURE BREAKDOWN
+=========================================================================================================
+strategy: ───────────────────────────────────────────────> Strategy definition block
+  type: RollingUpdate ───────────────────────────────────> Zero-downtime rolling update strategy
+  rollingUpdate: ────────────────────────────────────────> Percentage-based rolling rate parameters
+    maxSurge: 50% ───────────────────────────────────────> Spawns up to 50% extra pods in parallel batches (rounded UP)
+    maxUnavailable: 25% ─────────────────────────────────> Allows up to 25% pods unready during rollout (rounded DOWN)
+```
 * Suitable for large fleets (e.g., 20 replicas) where scaling pods in batches speeds up deployment time.
 
 #### The Forbidden Configuration: Why `maxSurge: 0` and `maxUnavailable: 0` Is Rejected
@@ -477,6 +643,17 @@ strategy:
   rollingUpdate:
     maxSurge: 0
     maxUnavailable: 0   # REJECTED!
+```
+```text
+=========================================================================================================
+            FORBIDDEN CONFIGURATION (DEADLOCK) STRUCTURE BREAKDOWN
+=========================================================================================================
+strategy: ───────────────────────────────────────────────> Strategy definition block
+  type: RollingUpdate ───────────────────────────────────> Progressive update attempt
+  rollingUpdate: ────────────────────────────────────────> Mutually exclusive parameters
+    maxSurge: 0 ─────────────────────────────────────────> Cannot launch new pod first (cannot exceed replica target)
+    maxUnavailable: 0 ───────────────────────────────────> Cannot kill old pod first (cannot drop below replica target)
+    # RESULT: Controller deadlock! Rejected by Kubernetes Admission Controller with validation error.
 ```
 
 **Why does Kubernetes reject this?**
@@ -498,6 +675,15 @@ Unlike Deployments which manage ReplicaSets, a **StatefulSet** manages its Pods 
      type: RollingUpdate
      rollingUpdate:
        partition: 2   # In a 3-replica set (0, 1, 2), ONLY mysql-2 is updated to the new image!
+   ```
+   ```text
+   ======================================================================================================
+               STATEFULSET CANARY PARTITION STRUCTURE BREAKDOWN
+   ======================================================================================================
+   updateStrategy: ──────────────────────────────────────> StatefulSet update strategy block
+     type: RollingUpdate ────────────────────────────────> Rolls updates in reverse ordinal order (2 -> 1 -> 0)
+     rollingUpdate: ─────────────────────────────────────> Partition settings
+       partition: 2 ─────────────────────────────────────> Only pods with index >= 2 are updated; 0 & 1 untouched
    ```
    `mysql-0` and `mysql-1` remain on the old version, allowing safe canary validation for stateful databases!
 
@@ -698,6 +884,49 @@ spec:
     targetPort: 80
 ```
 
+#### Stateless Deployment & ClusterIP Service Structure Breakdown:
+```text
+=========================================================================================================
+            STATELESS DEPLOYMENT & CLUSTERIP SERVICE STRUCTURE BREAKDOWN
+=========================================================================================================
+# ─── PART 1: STATELESS DEPLOYMENT ───────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1 ─────────────────────────────────────> API group for Deployment controllers
+kind: Deployment ────────────────────────────────────────> Stateless workload controller resource
+metadata: ───────────────────────────────────────────────> Object metadata
+  name: stateless-web ───────────────────────────────────> Unique Deployment resource name
+  namespace: exercise-06 ────────────────────────────────> Isolated namespace scope
+spec: ───────────────────────────────────────────────────> Desired workload specifications
+  replicas: 3 ───────────────────────────────────────────> Maintain 3 interchangeable, disposable pods
+  selector: ─────────────────────────────────────────────> Selector query
+    matchLabels: ────────────────────────────────────────> Label criteria for pod management
+      app: stateless-web ────────────────────────────────> Must match pod template labels
+  template: ─────────────────────────────────────────────> Pod blueprint
+    metadata: ───────────────────────────────────────────> Pod metadata
+      labels: ───────────────────────────────────────────> Labels assigned to spawned pods
+        app: stateless-web ──────────────────────────────> Used by Deployment and Service selectors
+    spec: ───────────────────────────────────────────────> Container specification
+      containers: ───────────────────────────────────────> Pod container list
+      - name: nginx ─────────────────────────────────────> Web server container name
+        image: nginx:1.28 ───────────────────────────────> Ephemeral container image
+        ports: ──────────────────────────────────────────> Exposed port
+        - containerPort: 80 ─────────────────────────────> Listens on port 80
+
+---
+# ─── PART 2: STANDARD CLUSTERIP SERVICE ─────────────────────────────────────────────────────────────────
+apiVersion: v1 ──────────────────────────────────────────> Core Kubernetes API version
+kind: Service ───────────────────────────────────────────> L4 internal load balancer & stable virtual IP
+metadata: ───────────────────────────────────────────────> Service metadata
+  name: web-service ─────────────────────────────────────> DNS name (web-service.exercise-06.svc.cluster.local)
+  namespace: exercise-06 ────────────────────────────────> Namespace boundary
+spec: ───────────────────────────────────────────────────> Service specifications
+  type: ClusterIP ───────────────────────────────────────> Internal virtual cluster IP (default, non-headless)
+  selector: ─────────────────────────────────────────────> Endpoints selector query
+    app: stateless-web ──────────────────────────────────> Routes randomly to any pod labeled app=stateless-web
+  ports: ────────────────────────────────────────────────> Port mapping definition
+  - port: 80 ────────────────────────────────────────────> Port exposed by the Service internally
+    targetPort: 80 ──────────────────────────────────────> Target port on the container receiving traffic
+```
+
 #### Manifest 2: StatefulSet with Headless Service & Volume Claim Template
 ```yaml
 apiVersion: v1
@@ -755,6 +984,69 @@ spec:
       resources:
         requests:
           storage: 2Gi
+```
+
+#### StatefulSet & Headless Service Structure Breakdown:
+```text
+=========================================================================================================
+            STATEFULSET & HEADLESS SERVICE STRUCTURE BREAKDOWN
+=========================================================================================================
+# ─── PART 1: HEADLESS SERVICE (clusterIP: None) ─────────────────────────────────────────────────────────
+apiVersion: v1 ──────────────────────────────────────────> Core Kubernetes API version
+kind: Service ───────────────────────────────────────────> Service resource definition
+metadata: ───────────────────────────────────────────────> Service metadata
+  name: database-headless ───────────────────────────────> Headless service name matching StatefulSet serviceName
+  namespace: exercise-06 ────────────────────────────────> Namespace boundary
+spec: ───────────────────────────────────────────────────> Service specifications
+  clusterIP: None ───────────────────────────────────────> CRITICAL: Makes it Headless! Disables VIP; creates direct Pod DNS
+  selector: ─────────────────────────────────────────────> Pod selector query
+    app: stateful-db ────────────────────────────────────> Associates with StatefulSet pods
+  ports: ────────────────────────────────────────────────> Ports exposed
+  - port: 5432 ──────────────────────────────────────────> PostgreSQL database port
+    name: postgres ──────────────────────────────────────> Port identifier
+
+---
+# ─── PART 2: STATEFULSET WORKLOAD CONTROLLER ────────────────────────────────────────────────────────────
+apiVersion: apps/v1 ─────────────────────────────────────> Apps API group
+kind: StatefulSet ───────────────────────────────────────> Stateful controller managing ordinal pods with dedicated storage
+metadata: ───────────────────────────────────────────────> StatefulSet metadata
+  name: stateful-db ─────────────────────────────────────> Generates predictable pods: stateful-db-0, stateful-db-1, stateful-db-2
+  namespace: exercise-06 ────────────────────────────────> Namespace boundary
+spec: ───────────────────────────────────────────────────> StatefulSet specification
+  serviceName: database-headless ────────────────────────> Binds to Headless Service for individual pod DNS FQDN resolution
+  replicas: 3 ───────────────────────────────────────────> Exactly 3 sequential replicas (0, 1, 2)
+  podManagementPolicy: OrderedReady ─────────────────────> Strict ordered startup (0->1->2) & reverse teardown (2->1->0)
+  persistentVolumeClaimRetentionPolicy: ─────────────────> Storage lifecycle control (Kubernetes v1.27+, GA v1.32+)
+    whenDeleted: Retain ─────────────────────────────────> Retain PVCs and disk data if StatefulSet controller is deleted
+    whenScaled: Delete ──────────────────────────────────> Automatically purge PVCs when scaling down replicas (e.g., 3 -> 1)
+  selector: ─────────────────────────────────────────────> Immutable pod selector query
+    matchLabels: ────────────────────────────────────────> Label query
+      app: stateful-db ──────────────────────────────────> Must match template labels exactly
+  template: ─────────────────────────────────────────────> Pod template
+    metadata: ───────────────────────────────────────────> Pod metadata
+      labels: ───────────────────────────────────────────> Labels assigned to each replica
+        app: stateful-db ────────────────────────────────> Used by selector and headless service
+    spec: ───────────────────────────────────────────────> Pod specs
+      containers: ───────────────────────────────────────> Containers in pod
+      - name: postgres ──────────────────────────────────> Database container name
+        image: postgres:16-alpine ───────────────────────> Stateful database engine image
+        ports: ──────────────────────────────────────────> Exposed ports
+        - containerPort: 5432 ───────────────────────────> Standard PostgreSQL listening port
+          name: postgres ────────────────────────────────> Named port reference
+        env: ────────────────────────────────────────────> Environment variables for initialization
+        - name: POSTGRES_PASSWORD ───────────────────────> Environment key for database password
+          value: "cka-exam-pass" ────────────────────────> Secret / plaintext password value
+        volumeMounts: ───────────────────────────────────> Storage mount points inside container
+        - name: db-data ─────────────────────────────────> Must match name in volumeClaimTemplates
+          mountPath: /var/lib/postgresql/data ───────────> Path where database writes persistent table files
+  volumeClaimTemplates: ─────────────────────────────────> Dynamically provisions a dedicated PVC for each replica ordinal
+  - metadata: ───────────────────────────────────────────> Template metadata
+      name: db-data ─────────────────────────────────────> Generates: db-data-stateful-db-0, db-data-stateful-db-1, etc.
+    spec: ───────────────────────────────────────────────> PersistentVolumeClaim specifications
+      accessModes: ["ReadWriteOnce"] ────────────────────> Volume can be mounted as read-write by a single node at a time
+      resources: ────────────────────────────────────────> Storage size request
+        requests: ───────────────────────────────────────> Resource minimums
+          storage: 2Gi ──────────────────────────────────> Automatically claims 2 Gibibytes from default StorageClass
 ```
 
 #### StatefulSet Headless Service DNS Record Anatomy:
