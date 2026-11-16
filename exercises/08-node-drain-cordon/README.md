@@ -917,42 +917,422 @@ spec:
 
 ---
 
-### 11. CKA Exam Cheat Sheet & Quick Decision Tree
+### 11. Static Pods, Mirror Pods & Control-Plane Node Maintenance
+
+In Kubernetes, **Static Pods** are managed directly by the local `kubelet` daemon on a specific node, rather than by the `kube-apiserver` and workload controllers.
+* **Storage Location**: Defined by local manifest files in `/etc/kubernetes/manifests/` (or configured via `--pod-manifest-path` in the Kubelet configuration).
+* **Control-Plane Components as Static Pods**: In clusters created with `kubeadm`, the core control-plane components—`kube-apiserver`, `kube-controller-manager`, `kube-scheduler`, and `etcd`—run as static pods on the control-plane nodes.
+* **Mirror Pods**: The `kubelet` creates an unmanaged read-only reflection of the static pod on the API server known as a **Mirror Pod** (identified by the annotation `kubernetes.io/config.mirror`).
+
+#### How `kubectl drain` Handles Static / Mirror Pods
+When an administrator executes `kubectl drain` on a control-plane node:
+1. `kubectl drain` discovers the mirror pods representing `kube-apiserver`, `etcd`, etc.
+2. It recognizes them as mirror pods backed by the local filesystem.
+3. Instead of failing or aborting, `kubectl drain` **automatically skips mirror pods** and logs an informational notice:
+   ```text
+   node/control-plane-1 has mirror pods: etcd-control-plane-1, kube-apiserver-control-plane-1, kube-controller-manager-control-plane-1, kube-scheduler-control-plane-1
+   ```
+4. **Why are Static Pods skipped?** The API server has no authority to delete or reschedule a static pod. Only deleting the YAML file from `/etc/kubernetes/manifests/` or stopping the `kubelet` service will terminate a static pod.
+
+#### High-Availability (HA) Control-Plane Maintenance Rules
+When draining or performing maintenance on control-plane nodes in a multi-master cluster with stacked `etcd`:
+1. **Etcd Quorum Preservation**: `etcd` uses the Raft consensus algorithm and requires a strict majority quorum:
+   $$\text{Quorum} = \lfloor N/2 \rfloor + 1$$
+   - In a 3-node control-plane cluster, quorum is $2$. You can tolerate the loss of **at most 1 node**.
+   - **Never drain or reboot more than one control-plane node at a time!** Draining two nodes simultaneously destroys quorum, causing the entire cluster API to become read-only or completely unresponsive.
+2. **Pre-Maintenance Etcd Health Verification**:
+   ```bash
+   # Verify etcd endpoint health before draining control plane
+   sudo ETCDCTL_API=3 etcdctl \
+     --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+     --cert=/etc/kubernetes/pki/etcd/server.crt \
+     --key=/etc/kubernetes/pki/etcd/server.key \
+     --endpoints=https://127.0.0.1:2379 \
+     endpoint health -w table
+   ```
+
+---
+
+### 12. Zero-Downtime Drain Architecture & The Network Race Condition
+
+In high-throughput production environments, executing `kubectl drain` can cause sporadic `HTTP 502 Bad Gateway`, `HTTP 504 Gateway Timeout`, or `Connection Refused` errors if pods are not properly configured with termination lifecycle hooks.
+
+#### The Distributed Network Race Condition
+When the API server accepts an eviction request for a pod, two independent operations execute **in parallel**:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin as Operator (kubectl drain)
+    participant API as kube-apiserver
+    participant EPC as EndpointSlice Controller
+    participant Proxy as kube-proxy & Ingress
+    participant Kubelet as Kubelet on Drained Node
+    participant App as Application Container
+    participant Client as External Client Traffic
+
+    Admin->>API: POST /eviction
+    API->>API: Set deletionTimestamp on Pod
+
+    par Pipeline A: Network Route Deprovisioning (~2 to 4 seconds)
+        API->>EPC: Pod terminating -> Update EndpointSlice
+        EPC->>Proxy: Propagate updated EndpointSlice
+        Proxy->>Proxy: Update iptables / IPVS / Ingress routing tables
+        Note over Proxy: Endpoint removed from traffic pool
+    and Pipeline B: Local Process Termination (Milliseconds)
+        API->>Kubelet: Watch event: deletionTimestamp set
+        alt WITHOUT preStop Hook
+            Kubelet->>App: Sends SIGTERM immediately (<100ms)
+            App->>App: Closes listening socket & exits
+            Client->>Proxy: Sends HTTP Request
+            Proxy->>App: Forwards request to Pod IP (Route still in iptables!)
+            App-->>Client: Connection Refused / 502 Bad Gateway!
+        else WITH preStop Hook (sleep 15)
+            Kubelet->>App: Executes preStop: sleep 15
+            Note over App: App continues listening & serving requests
+            Client->>Proxy: Sends HTTP Request
+            Proxy->>App: Serves in-flight request successfully
+            Note over Proxy: EndpointSlice route removed while sleep 15 runs!
+            Kubelet->>App: preStop finishes -> Sends SIGTERM
+            App->>App: Gracefully drains remaining open TCP sockets & exits
+            Note over Client: Zero dropped requests!
+        end
+    end
+```
+
+#### Production Remedy: The `preStop` Sleep & Grace Period Alignment
+To eliminate 502 errors during node drains:
+1. Add a `preStop` hook with a short sleep (e.g., `sleep 10` to `sleep 15`) to allow `kube-proxy`, Ingress-NGINX, Envoy, and cloud load balancers sufficient time to de-register the pod IP.
+2. Ensure `terminationGracePeriodSeconds` is larger than the `preStop` duration plus the application's internal graceful shutdown window.
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 45
+  containers:
+  - name: api-service
+    image: api-service:v2.4
+    lifecycle:
+      preStop:
+        exec:
+          # Delays SIGTERM to let Ingress & kube-proxy remove Pod IP from routing
+          command: ["/bin/sh", "-c", "sleep 15"]
+```
+
+---
+
+### 13. Advanced PDB Configurations: `unhealthyPodEvictionPolicy` (Kubernetes 1.27+)
+
+In Kubernetes 1.26 and earlier, a critical limitation existed with PodDisruptionBudgets: **crashing or failing pods could permanently deadlock a node drain**.
+
+#### The Problem: Crashing Pods Blocking Maintenance
+Suppose a 3-replica backend deployment has:
+* 1 pod in `CrashLoopBackOff` or failing its `readinessProbe` (`Ready: false`).
+* 2 pods healthy and serving traffic (`Ready: true`).
+* A PDB with `minAvailable: 2`.
+
+When an operator ran `kubectl drain`:
+1. The target node hosts one of the healthy pods.
+2. If evicting that healthy pod leaves only 1 healthy pod, `currentHealthy (1) < minAvailable (2)`.
+3. The API server rejected eviction with `HTTP 429`.
+4. However, if the crashing pod was on the draining node, `kubectl drain` **could not evict the crashing pod either**, because the PDB controller considered the cluster already below desired availability! Maintenance was completely paralyzed.
+
+#### The Solution: `unhealthyPodEvictionPolicy`
+In Kubernetes 1.27+ (promoted to GA), the `spec.unhealthyPodEvictionPolicy` field allows you to specify whether unhealthy pods should block eviction:
+
+| Policy Value | Behavior during `kubectl drain` |
+| :--- | :--- |
+| `IfHealthyBudget` *(Default)* | Unhealthy pods are evicted **only if** the disruption budget is currently healthy. If the app is degraded, drain blocks. |
+| `AlwaysAllow` *(Recommended for Prod)* | Pods that are running but not ready (`Ready: false` or `CrashLoopBackOff`) are **always permitted to be evicted immediately**, preventing deadlocks. |
+
+#### Production Manifest: Resilient PDB
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: resilient-backend-pdb
+  namespace: production
+spec:
+  minAvailable: 80%
+  # Prevents crashing pods from paralyzing cluster node maintenance
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: backend
+```
+
+---
+
+### 14. Storage Dynamics: Local PVs vs. hostPath vs. Network Volumes
+
+Understanding how each storage type behaves during node drain is vital for stateful workloads:
 
 ```mermaid
 flowchart TD
-    Prompt["Exam Task: Perform Maintenance / Drain a Node"] --> Step1["Step 1: Check node name<br/>kubectl get nodes"]
-    Step1 --> Step2["Step 2: Cordon Node (if asked)<br/>kubectl cordon &lt;node&gt;"]
-    Step1 --> Step3["Step 3: Drain Node<br/>kubectl drain &lt;node&gt; --ignore-daemonsets --delete-emptydir-data"]
+    VolumeType{"Storage Volume Type"} --> Ephemeral["emptyDir"]
+    VolumeType --> Host["hostPath"]
+    VolumeType --> LocalPV["Local PersistentVolume (LPV)"]
+    VolumeType --> NetworkCSI["Network CSI (EBS / GCE-PD / Ceph)"]
+
+    Ephemeral -->|"Requires --delete-emptydir-data"| E1["Data wiped on eviction.<br/>Pod gets fresh volume on new node."]
+    Host -->|"Standard Drain Evicts Pod"| H1["Data remains on old host.<br/>Replacement pod on new host has empty or missing path!"]
+    LocalPV -->|"Standard Drain Evicts Pod"| L1["Replacement pod created with same PVC.<br/>Scheduler CANNOT place pod on any other node!<br/>Result: Pod stuck in Pending (Volume node affinity conflict)"]
+    NetworkCSI -->|"Standard Drain Evicts Pod"| N1["Volume unmounted on old node.<br/>VolumeAttachment detached.<br/>Volume reattached and mounted on new node."]
+```
+
+#### 14.1 Local Persistent Volumes (LPV) and the Affinity Conflict Trap
+A **Local Persistent Volume** represents a local physical disk (e.g., an NVMe drive) attached to a specific node. It specifies a hard `nodeAffinity`:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-nvme-pv
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /mnt/fast-disks/vol1
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - worker-1
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-storage
+provisioner: kubernetes.io/no-provisioner
+# CRITICAL: Delays volume binding until pod is placed by scheduler
+volumeBindingMode: WaitForFirstConsumer
+```
+
+> [!WARNING]
+> **What happens during drain with Local PVs?**
+> If you drain `worker-1`, any pod bound to `local-nvme-pv` is evicted. The StatefulSet controller creates a replacement pod referencing the same PVC. However, `local-nvme-pv` is physically tied to `worker-1` via `nodeAffinity`. Since `worker-1` is cordoned (`spec.unschedulable: true`), `kube-scheduler` reports:
+> `0/4 nodes available: 1 node(s) had volume node affinity conflict, 3 node(s) had volume conflict.`
+> The replacement pod **remains `Pending` until `worker-1` is uncordoned and returns to service.**
+
+---
+
+### 15. Automated Node Failure Eviction vs. Manual Drain (Node Controller Dynamics)
+
+What happens when a node abruptly dies (power outage, kernel freeze, network partition) without an operator running `kubectl drain`?
+
+#### Heartbeats & Node Leases
+1. Every node runs a `NodeLease` object in the `kube-node-lease` namespace. The `kubelet` renews this lease every 10 seconds (`--node-status-update-frequency`).
+2. The Node Lifecycle Controller in `kube-controller-manager` checks these leases.
+3. If no heartbeat is received within `--node-monitor-grace-period` (default: 40 seconds), the node status changes from `Ready: True` to `Ready: Unknown`.
+
+#### Automated Eviction via Taints
+Once marked `Ready: Unknown` or `Ready: False`, the Node Lifecycle Controller automatically applies the following taints:
+* `node.kubernetes.io/not-ready:NoExecute`
+* `node.kubernetes.io/unreachable:NoExecute`
+
+#### The 300-Second Eviction Delay (`tolerationSeconds`)
+By default, Kubernetes automatically injects the following toleration into every pod specification:
+```yaml
+tolerations:
+- key: node.kubernetes.io/not-ready
+  operator: Exists
+  effect: NoExecute
+  tolerationSeconds: 300
+- key: node.kubernetes.io/unreachable
+  operator: Exists
+  effect: NoExecute
+  tolerationSeconds: 300
+```
+* **Meaning**: When a node crashes unexpectedly, Kubernetes waits **300 seconds (5 minutes)** before evicting pods from the failed node.
+* **Why 5 minutes?** This prevents massive "pod thrashing" or cascading failovers caused by transient network blips or quick reboots.
+* **Tuning for Fast Failover**: For critical stateless services requiring rapid automated failover, reduce `tolerationSeconds` to 30 or 60 seconds in the deployment template:
+  ```yaml
+  tolerations:
+  - key: node.kubernetes.io/unreachable
+    operator: Exists
+    effect: NoExecute
+    tolerationSeconds: 30
+  ```
+
+---
+
+### 16. Enterprise Shell Automation: `safe-node-drain.sh`
+
+In enterprise production environments, manual `kubectl drain` commands are encapsulated into automated, validated maintenance scripts. The following production-ready script performs pre-flight capacity checks, inspects PDBs, executes safe draining with rollbacks, and handles timeouts:
+
+```bash
+#!/usr/bin/env bash
+# ==============================================================================
+# Script: safe-node-drain.sh
+# Purpose: Production-grade safe node drain with capacity and PDB pre-checks
+# ==============================================================================
+set -euo pipefail
+
+NODE_NAME="${1:-}"
+TIMEOUT="15m"
+
+if [[ -z "${NODE_NAME}" ]]; then
+  echo "ERROR: Target node name required. Usage: $0 <node-name>"
+  exit 1
+fi
+
+echo "===================================================================="
+echo "Starting Safe Node Drain for: ${NODE_NAME}"
+echo "===================================================================="
+
+# 1. Verify kubectl connectivity and node existence
+if ! kubectl get node "${NODE_NAME}" >/dev/null 2>&1; then
+  echo "ERROR: Node ${NODE_NAME} does not exist in cluster."
+  exit 1
+fi
+
+# 2. Pre-check: Inspect PodDisruptionBudgets for 0 disruptions allowed
+echo "[+] Checking for potential PDB deadlocks on target node..."
+BLOCKED_PDBS=$(kubectl get pdb -A -o json | jq -r '
+  .items[] | 
+  select(.status.disruptionsAllowed == 0) | 
+  "Namespace: \(.metadata.namespace), PDB: \(.metadata.name), Allowed: \(.status.disruptionsAllowed)"
+')
+
+if [[ -n "${BLOCKED_PDBS}" ]]; then
+  echo "WARNING: The following PDBs currently have 0 disruptions allowed:"
+  echo "${BLOCKED_PDBS}"
+  echo "Note: If any pods on ${NODE_NAME} belong to these PDBs, drain may block."
+fi
+
+# 3. Pre-check: Cluster CPU / Memory Capacity Headroom
+TOTAL_NODES=$(kubectl get nodes --no-headers | wc -l)
+READY_NODES=$(kubectl get nodes --no-headers | grep -w "Ready" | wc -l)
+echo "[+] Cluster health: ${READY_NODES}/${TOTAL_NODES} nodes Ready."
+
+if [[ "${READY_NODES}" -le 2 ]]; then
+  echo "WARNING: Small cluster detected (<= 2 Ready nodes). Drain may lead to Pending pods."
+fi
+
+# 4. Cordon the node
+echo "[+] Cordoning node: ${NODE_NAME}..."
+kubectl cordon "${NODE_NAME}"
+
+# 5. Trap signals to guarantee uncordon on user cancel (Ctrl+C)
+trap 'echo "[-] Script interrupted! Node remains cordoned for safety: ${NODE_NAME}"; exit 1' INT TERM
+
+# 6. Execute graceful drain with safety flags
+echo "[+] Executing drain (Timeout: ${TIMEOUT})..."
+if kubectl drain "${NODE_NAME}" \
+  --ignore-daemonsets \
+  --delete-emptydir-data \
+  --timeout="${TIMEOUT}"; then
+  echo "===================================================================="
+  echo "SUCCESS: Node ${NODE_NAME} successfully drained."
+  echo "Only DaemonSets remain on the node. Safe to proceed with maintenance."
+  echo "===================================================================="
+else
+  echo "ERROR: Drain failed on ${NODE_NAME} within ${TIMEOUT}!"
+  echo "To safely rollback and restore node scheduling, run: kubectl uncordon ${NODE_NAME}"
+  exit 1
+fi
+```
+
+---
+
+### 17. Hands-On Troubleshooting Drills & Scenarios
+
+#### Drill 1: Diagnose & Fix a PDB Deadlock
+* **Scenario**: You run `kubectl drain worker-2 --ignore-daemonsets` and the terminal freezes for 10 minutes with:
+  ```text
+  evicting pod default/payment-api-7b89f-k8l9m
+  error when evicting pods: Cannot evict pod as it would violate the pod's disruption budget.
+  ```
+* **Step-by-Step Resolution**:
+  ```bash
+  # 1. Identify which PDB is blocking
+  kubectl get pdb -A
+
+  # Output shows:
+  # NAMESPACE   NAME          MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+  # default     payment-pdb   1               N/A               0                     5d
+
+  # 2. Check replicas of the underlying deployment
+  kubectl get deployment payment-api
+  # Only 1 replica is running!
+
+  # 3. Remedy A: Scale up deployment to satisfy minAvailable (Recommended)
+  kubectl scale deployment payment-api --replicas=2
+  kubectl rollout status deployment payment-api
+
+  # 4. As soon as replica 2 is Ready, disruptionsAllowed becomes 1, and drain succeeds automatically!
+  ```
+
+#### Drill 2: Diagnose & Fix an Unmanaged Pod Blocking Drain
+* **Scenario**: Drain fails immediately with:
+  ```text
+  cannot delete Pods not managed by ReplicationController, ReplicaSet, Job, DaemonSet or StatefulSet: default/manual-loadgen
+  ```
+* **Step-by-Step Resolution**:
+  ```bash
+  # 1. Inspect the offending pod
+  kubectl get pod manual-loadgen -o yaml | grep ownerReferences -A 5
+  # Empty ownerReferences confirms it is a standalone / bare pod!
+
+  # 2. Check if the pod is critical or temporary
+  # If temporary/throwaway, rerun drain with --force:
+  kubectl drain worker-1 --ignore-daemonsets --delete-emptydir-data --force
+
+  # 3. If the pod was running critical production code, convert it to a Deployment:
+  # kubectl create deployment loadgen --image=...
+  ```
+
+#### Drill 3: Diagnose & Fix a Pod Stuck in `Terminating` with Finalizers
+* **Scenario**: Drain is stuck waiting on `pod/logging-shipper-4a5b` which has been in `Terminating` for 20 minutes.
+* **Step-by-Step Resolution**:
+  ```bash
+  # 1. Check why the pod cannot terminate
+  kubectl describe pod logging-shipper-4a5b
+
+  # 2. Inspect active finalizers
+  kubectl get pod logging-shipper-4a5b -o jsonpath='{.metadata.finalizers}'
+  # Returns: ["storage.company.com/cleanup-lock"]
+
+  # 3. Check if the controller handling that finalizer is dead or broken
+  # If cleanup is verified or controller is defunct, patch the finalizer out:
+  kubectl patch pod logging-shipper-4a5b -p '{"metadata":{"finalizers":null}}'
+  # The pod disappears immediately, and drain finishes!
+  ```
+
+---
+
+### 18. CKA Exam Cheat Sheet & Quick Decision Tree
+
+```mermaid
+flowchart TD
+    Prompt["Exam Task: Perform Maintenance / Upgrade a Node"] --> Step1["Step 1: Identify target node<br/>kubectl get nodes"]
+    Step1 --> Step2["Step 2: Cordon Node (if explicitly asked)<br/>kubectl cordon &lt;node&gt;"]
+    Step1 --> Step3["Step 3: Drain Node with Safe Flags<br/>kubectl drain &lt;node&gt; --ignore-daemonsets --delete-emptydir-data"]
     Step3 --> CheckFail{"Did drain fail with error?"}
-    CheckFail -->|"Pods not managed by controller"| AddForce["Add --force flag"]
-    CheckFail -->|"PDB violation / timeout"| CheckPDB["Check kubectl get pdb -A<br/>Scale deployment or check replicas"]
-    CheckFail -->|"Success"| Step4["Step 4: Perform task (upgrade, edit, etc.)"]
+    CheckFail -->|"Pods not managed by controller"| AddForce["Append --force flag"]
+    CheckFail -->|"PDB violation / timeout"| CheckPDB["Check kubectl get pdb -A<br/>Scale deployment OR patch PDB"]
+    CheckFail -->|"Success"| Step4["Step 4: Perform task<br/>(kubeadm upgrade, OS edit, etc.)"]
     Step4 --> Step5["Step 5: Uncordon Node<br/>kubectl uncordon &lt;node&gt;"]
     Step5 --> Step6["Step 6: Verify Ready state<br/>kubectl get nodes"]
 ```
 
-#### Speed Commands for the CKA Exam:
-```bash
-# 1. Standard CKA Safe Drain (Use this 99% of the time)
-kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
+#### Speed Commands Reference Table:
+| Goal / Exam Scenario | Optimal Command Syntax | Notes & Warnings |
+| :--- | :--- | :--- |
+| **Standard Safe Drain** | `kubectl drain <node> --ignore-daemonsets --delete-emptydir-data` | Memorize this exact combination for CKA. Works 99% of the time. |
+| **Drain with Bare Pods** | `kubectl drain <node> --ignore-daemonsets --delete-emptydir-data --force` | Use when standalone pods are present on the node. |
+| **Pre-Drain Dry Run** | `kubectl drain <node> --ignore-daemonsets --delete-emptydir-data --dry-run=client` | Verifies which pods will be evicted without touching cluster state. |
+| **Mark Unschedulable Only** | `kubectl cordon <node>` | Stops new pods; existing pods keep running. |
+| **Restore Scheduling** | `kubectl uncordon <node>` | Node returns to `Ready` without `SchedulingDisabled`. |
+| **Check Remaining Pods** | `kubectl get pods -A --field-selector spec.nodeName=<node>` | Inspect all pods still residing on the target node. |
+| **Verify DaemonSets** | `kubectl get daemonsets -A` | Compare pods remaining on drained node against cluster DaemonSets. |
+| **Filter by Labels** | `kubectl drain <node> --pod-selector app=frontend --ignore-daemonsets` | Only evicts pods matching the specified label. |
+| **Fast Termination** | `kubectl drain <node> --ignore-daemonsets --grace-period=0 --force` | Bypasses 30s grace period for instant shutdown in test environments. |
 
-# 2. If unmanaged pods are present on the node, append --force
-kubectl drain <node> --ignore-daemonsets --delete-emptydir-data --force
-
-# 3. Simulate drain without evicting (Client dry-run)
-kubectl drain <node> --ignore-daemonsets --delete-emptydir-data --dry-run=client
-
-# 4. View all pods remaining on a specific node
-kubectl get pods -A --field-selector spec.nodeName=<node> -o wide
-
-# 5. Check which pods are DaemonSets on a specific node
-kubectl get pods -A --field-selector spec.nodeName=<node> -o jsonpath='{range .items[?(@.metadata.ownerReferences[0].kind=="DaemonSet")]}{.metadata.name}{"\n"}{end}'
-
-# 6. Bring node back online
-kubectl uncordon <node>
-
-# 7. Check node conditions and scheduling status
-kubectl get node <node>
-```
 
