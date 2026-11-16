@@ -307,6 +307,42 @@ spec:
       app: payment-gateway
 ```
 
+##### Visual Structure Breakdown: `webapp-pdb.yaml` (`minAvailable`)
+
+```text
+========================================================================================================================
+                       KUBERNETES webapp-pdb.yaml (minAvailable) STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: policy/v1 ───────────────────────────────► API group & version for cluster disruption budgets
+kind: PodDisruptionBudget ───────────────────────────► Declares resource type as a PodDisruptionBudget
+metadata: ───────────────────────────────────────────► Object metadata and namespace isolation
+  name: webapp-pdb ──────────────────────────────────► Unique name for this disruption budget rule
+  namespace: production ─────────────────────────────► Namespace boundary where target pods reside
+spec: ───────────────────────────────────────────────► Disruption rules and availability guarantees
+  minAvailable: 2 ───────────────────────────────────► Minimum pods that MUST remain Ready during voluntary drain
+  selector: ─────────────────────────────────────────► Target pod selection criteria
+    matchLabels: ────────────────────────────────────► Label key-value pairs matching workload pods
+      app: webapp ───────────────────────────────────► Enforces budget on pods with label "app: webapp"
+```
+
+##### Visual Structure Breakdown: `payment-pdb.yaml` (`maxUnavailable`)
+
+```text
+========================================================================================================================
+                      KUBERNETES payment-pdb.yaml (maxUnavailable) STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: policy/v1 ───────────────────────────────► API group & version for cluster disruption budgets
+kind: PodDisruptionBudget ───────────────────────────► Declares resource type as a PodDisruptionBudget
+metadata: ───────────────────────────────────────────► Object metadata and identification
+  name: payment-pdb ─────────────────────────────────► Unique identifier for the payment disruption policy
+  namespace: production ─────────────────────────────► Namespace scope of the payment application
+spec: ───────────────────────────────────────────────► Disruption thresholds specification
+  maxUnavailable: 1 ─────────────────────────────────► At most 1 pod may be unavailable simultaneously during drain
+  selector: ─────────────────────────────────────────► Label selector binding policy to target pods
+    matchLabels: ────────────────────────────────────► Label matching rules
+      app: payment-gateway ──────────────────────────► Binds budget to payment gateway pods
+```
+
 #### 3.3 The PDB Drain Deadlock (Production Trap)
 One of the most common reasons `kubectl drain` freezes in production is a **misconfigured PDB**.
 
@@ -421,6 +457,59 @@ spec:
       - name: varlog
         hostPath:
           path: /var/log
+```
+
+##### Visual Structure Breakdown: `node-logging-agent.yaml` (DaemonSet)
+
+```text
+========================================================================================================================
+                       KUBERNETES node-logging-agent.yaml (DAEMONSET) STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: apps/v1 ─────────────────────────────────► Workload controller API group (DaemonSets, Deployments)
+kind: DaemonSet ─────────────────────────────────────► Ensures exactly 1 pod copy runs per node in the cluster
+metadata: ───────────────────────────────────────────► Identity and categorization of the DaemonSet
+  name: node-logging-agent ──────────────────────────► Unique DaemonSet name in the namespace
+  namespace: kube-system ────────────────────────────► Deployed in kube-system for cluster-wide infrastructure
+  labels: ───────────────────────────────────────────► Management labels for filtering and queries
+    app: logging-agent ──────────────────────────────► Standard app identifier label
+spec: ───────────────────────────────────────────────► DaemonSet controller specification
+  selector: ─────────────────────────────────────────► Pod selector connecting DaemonSet to pod template
+    matchLabels: ────────────────────────────────────► Must match template labels exactly
+      app: logging-agent ────────────────────────────► Selector query
+  updateStrategy: ───────────────────────────────────► How daemon pods are replaced during image upgrades
+    type: RollingUpdate ─────────────────────────────► Automatically updates node by node without manual deletion
+    rollingUpdate: ──────────────────────────────────► Rolling update pacing parameters
+      maxUnavailable: 1 ─────────────────────────────► Updates 1 node at a time; 99% nodes remain logged
+  template: ─────────────────────────────────────────► Pod blueprint stamped out onto every cluster node
+    metadata: ───────────────────────────────────────► Pod-level metadata
+      labels: ───────────────────────────────────────► Labels stamped onto each generated DaemonSet pod
+        app: logging-agent ──────────────────────────► Matches spec.selector.matchLabels
+    spec: ───────────────────────────────────────────► Pod execution specifications
+      tolerations: ──────────────────────────────────► Rules allowing pods to run on tainted/cordoned nodes
+      - key: node.kubernetes.io/unschedulable ────────► CRITICAL: Matches the taint added by "kubectl cordon"
+        operator: Exists ────────────────────────────► Tolerates key regardless of value
+        effect: NoSchedule ──────────────────────────► Allows pod to remain scheduled on cordoned maintenance node
+      - key: node-role.kubernetes.io/control-plane ──► Tolerates control-plane/master node taints
+        operator: Exists ────────────────────────────► Matches master taint
+        effect: NoSchedule ──────────────────────────► Allows logging agent to run on master nodes too
+      containers: ───────────────────────────────────► Container runtime specification
+      - name: fluent-bit ────────────────────────────► Container identifier
+        image: fluent/fluent-bit:3.1.8 ──────────────► Lightweight log forwarder image
+        resources: ──────────────────────────────────► Resource requests and limits (QoS class)
+          limits: ───────────────────────────────────► Hard ceiling before throttling or OOMKill
+            cpu: 200m ───────────────────────────────► 0.2 CPU core max limit
+            memory: 256Mi ───────────────────────────► 256 MiB RAM limit
+          requests: ─────────────────────────────────► Guaranteed resources reserved on host
+            cpu: 50m ────────────────────────────────► 50 millicores reserved
+            memory: 64Mi ────────────────────────────► 64 MiB RAM reserved
+        volumeMounts: ───────────────────────────────► Mounts host paths into container filesystem
+        - name: varlog ──────────────────────────────► References volume defined under spec.volumes
+          mountPath: /var/log ───────────────────────► Mount destination path inside container
+          readOnly: true ────────────────────────────► Security hardening: read-only access to host logs
+      volumes: ──────────────────────────────────────► Storage volumes accessible to the pod
+      - name: varlog ────────────────────────────────► Volume identifier
+        hostPath: ───────────────────────────────────► Binds directly to underlying worker host directory
+          path: /var/log ────────────────────────────► Physical host log directory path
 ```
 
 ---
@@ -703,6 +792,22 @@ affinity:
           app: cache
       topologyKey: "kubernetes.io/hostname"
 ```
+
+##### Visual Structure Breakdown: `anti-affinity.yaml`
+
+```text
+========================================================================================================================
+                          KUBERNETES anti-affinity.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+affinity: ───────────────────────────────────────────► Advanced scheduling placement rules
+  podAntiAffinity: ──────────────────────────────────► Prevents pods from co-locating on the same topology domain
+    requiredDuringSchedulingIgnoredDuringExecution: ─► HARD requirement: Scheduler REJECTS nodes violating this rule
+    - labelSelector: ────────────────────────────────► Query identifying which pods must NOT be co-located
+        matchLabels: ────────────────────────────────► Label criteria
+          app: cache ────────────────────────────────► Anti-affinity targets pods with label "app: cache"
+      topologyKey: "kubernetes.io/hostname" ─────────► Scope of isolation: each physical node hostname must have <=1 pod
+```
+
 If there are 3 replicas of `cache` across 3 worker nodes, and you drain `worker-1`, the evicted pod **cannot schedule onto worker-2 or worker-3** because they already run a pod with `app: cache`. The evicted pod stays `Pending` until `worker-1` is uncordoned or an additional node is added.
 
 ---
@@ -750,6 +855,35 @@ profiles:
       enabled: true
     RemovePodsViolatingTopologySpreadConstraint:
       enabled: true
+```
+
+##### Visual Structure Breakdown: `policy.yaml` (Descheduler)
+
+```text
+========================================================================================================================
+                       KUBERNETES descheduler-policy.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: "descheduler/v1alpha2" ──────────────────► Descheduler configuration API version
+kind: "DeschedulerPolicy" ───────────────────────────► Policy resource defining rebalancing heuristics
+profiles: ───────────────────────────────────────────► List of descheduler evaluation profiles
+- name: DefaultProfile ──────────────────────────────► Identifier for default rebalancing profile
+  strategies: ───────────────────────────────────────► Rebalancing strategy plugins executed by descheduler
+    LowNodeUtilization: ─────────────────────────────► Evicts pods from over-utilized nodes to under-utilized nodes
+      enabled: true ─────────────────────────────────► Activates node utilization rebalancer
+      params: ───────────────────────────────────────► Threshold criteria for balancing
+        nodeResourceUtilizationThresholds: ──────────► Percentage-based utilization boundaries
+          thresholds: ───────────────────────────────► Nodes BELOW this threshold are underutilized (receivers)
+            cpu: 20 ─────────────────────────────────► < 20% CPU utilization
+            memory: 20 ──────────────────────────────► < 20% Memory utilization
+            pods: 20 ────────────────────────────────► < 20% Pod capacity
+          targetThresholds: ─────────────────────────► Nodes ABOVE this threshold are overutilized (senders)
+            cpu: 70 ─────────────────────────────────► > 70% CPU triggers eviction
+            memory: 70 ──────────────────────────────► > 70% Memory triggers eviction
+            pods: 70 ────────────────────────────────► > 70% Pod capacity triggers eviction
+    RemoveDuplicates: ───────────────────────────────► Prevents multiple pods of same ReplicaSet on single node
+      enabled: true ─────────────────────────────────► Enables anti-clustering duplicate cleanup
+    RemovePodsViolatingTopologySpreadConstraint: ────► Enforces even zone/host spread after nodes recover
+      enabled: true ─────────────────────────────────► Evicts pods violating skew limits
 ```
 
 ---
@@ -825,6 +959,73 @@ spec:
             memory: 512Mi
 ```
 
+##### Visual Structure Breakdown: `production-web.yaml` (High-Availability Deployment)
+
+```text
+========================================================================================================================
+             KUBERNETES production-web.yaml (HIGH-AVAILABILITY DEPLOYMENT) STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: apps/v1 ─────────────────────────────────► Workload controller API group
+kind: Deployment ────────────────────────────────────► Declarative controller managing ReplicaSets and Pods
+metadata: ───────────────────────────────────────────► Deployment identification and metadata
+  name: production-web ──────────────────────────────► Unique deployment name in the namespace
+  namespace: production ─────────────────────────────► Logical boundary isolating production applications
+  labels: ───────────────────────────────────────────► Standard Kubernetes recommended labels
+    app.kubernetes.io/name: webapp ──────────────────► Identifies the workload as the web application
+spec: ───────────────────────────────────────────────► Desired state specification
+  replicas: 4 ───────────────────────────────────────► Desired replica count for high availability
+  selector: ─────────────────────────────────────────► Pod selector binding deployment to its pods
+    matchLabels: ────────────────────────────────────► Label criteria matched against pod template
+      app: webapp ───────────────────────────────────► Binds to pods with label "app: webapp"
+  template: ─────────────────────────────────────────► Pod blueprint stamped out across worker nodes
+    metadata: ───────────────────────────────────────► Pod-level metadata
+      labels: ───────────────────────────────────────► Labels stamped onto generated pods
+        app: webapp ─────────────────────────────────► Matches spec.selector.matchLabels exactly
+    spec: ───────────────────────────────────────────► Pod execution specifications
+      terminationGracePeriodSeconds: 60 ─────────────► CRITICAL: Allows 60s for in-flight requests to complete
+      topologySpreadConstraints: ────────────────────► Controls replica distribution to prevent single-node failure
+      - maxSkew: 1 ──────────────────────────────────► Max replica difference between nodes is at most 1
+        topologyKey: "kubernetes.io/hostname" ───────► Distributes replicas evenly across physical worker nodes
+        whenUnsatisfiable: DoNotSchedule ────────────► Hard constraint: Rejects scheduling if skew is violated
+        labelSelector: ──────────────────────────────► Identifies which pods to balance
+          matchLabels:
+            app: webapp
+      - maxSkew: 1 ──────────────────────────────────► Max replica difference between AZs is at most 1
+        topologyKey: "topology.kubernetes.io/zone" ──► Distributes replicas across cloud Availability Zones
+        whenUnsatisfiable: ScheduleAnyway ───────────► Soft constraint: Allows scheduling if zone capacity tight
+        labelSelector:
+          matchLabels:
+            app: webapp
+      containers: ───────────────────────────────────► Container array
+      - name: nginx ─────────────────────────────────► Container name
+        image: nginx:1.27-alpine ────────────────────► Hardened minimal web server container image
+        lifecycle: ──────────────────────────────────► Container lifecycle hook events
+          preStop: ──────────────────────────────────► Triggered BEFORE container receives SIGTERM
+            exec: ───────────────────────────────────► Command executed inside container before shutdown
+              command: ["/bin/sh", "-c", "sleep 10"] ► CRITICAL: Sleeps 10s so Ingress removes endpoint first
+        ports: ──────────────────────────────────────► Network ports exposed
+        - containerPort: 80 ─────────────────────────► Port container process listens on
+        readinessProbe: ─────────────────────────────► Gates traffic delivery via Service / EndpointSlice
+          httpGet: ──────────────────────────────────► Probes HTTP GET on / endpoint
+            path: /
+            port: 80
+          initialDelaySeconds: 5 ────────────────────► Wait 5s after startup before first probe
+          periodSeconds: 5 ──────────────────────────► Repeat readiness check every 5 seconds
+        livenessProbe: ──────────────────────────────► Detects deadlocks and restarts container if failed
+          httpGet: ──────────────────────────────────► Probes HTTP GET on / endpoint
+            path: /
+            port: 80
+          initialDelaySeconds: 15 ───────────────────► Wait 15s after startup before checking liveness
+          periodSeconds: 10 ─────────────────────────► Check liveness every 10 seconds
+        resources: ──────────────────────────────────► Resource requests and limits (Burstable QoS)
+          requests: ─────────────────────────────────► Guaranteed resources reserved on node by scheduler
+            cpu: 100m ───────────────────────────────► 100 millicores (0.1 core) reserved
+            memory: 128Mi ───────────────────────────► 128 MiB RAM reserved
+          limits: ───────────────────────────────────► Upper ceiling before CPU throttling or OOMKill
+            cpu: 500m ───────────────────────────────► 0.5 CPU core limit
+            memory: 512Mi ───────────────────────────► 512 MiB RAM limit (OOMKilled if exceeded)
+```
+
 ---
 
 #### Manifest B: Production PodDisruptionBudget (PDB)
@@ -842,6 +1043,24 @@ spec:
   selector:
     matchLabels:
       app: webapp
+```
+
+##### Visual Structure Breakdown: `production-web-pdb.yaml`
+
+```text
+========================================================================================================================
+                    KUBERNETES production-web-pdb.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: policy/v1 ───────────────────────────────► API group & version for disruption budgets
+kind: PodDisruptionBudget ───────────────────────────► Resource defining minimum availability during drain
+metadata: ───────────────────────────────────────────► Metadata and identification
+  name: production-web-pdb ──────────────────────────► Unique name for this PDB
+  namespace: production ─────────────────────────────► Namespace scope matching targeted deployment
+spec: ───────────────────────────────────────────────► Disruption rules
+  minAvailable: 3 ───────────────────────────────────► 3 out of 4 replicas MUST remain Ready during node drain
+  selector: ─────────────────────────────────────────► Target selector
+    matchLabels: ────────────────────────────────────► Label key-value pairs
+      app: webapp ───────────────────────────────────► Enforces disruption budget on "app: webapp" pods
 ```
 
 ---
@@ -891,6 +1110,53 @@ spec:
           storage: 20Gi
 ```
 
+##### Visual Structure Breakdown: `database-cluster.yaml` (StatefulSet & Storage)
+
+```text
+========================================================================================================================
+                KUBERNETES database-cluster.yaml (STATEFULSET & STORAGE) STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: apps/v1 ─────────────────────────────────► Core workload controller API group
+kind: StatefulSet ───────────────────────────────────► Controller managing stateful pods with ordered identities
+metadata: ───────────────────────────────────────────► StatefulSet metadata
+  name: database-cluster ────────────────────────────► StatefulSet identifier
+  namespace: production ─────────────────────────────► Namespace partition
+spec: ───────────────────────────────────────────────► StatefulSet configuration
+  serviceName: "db-headless" ────────────────────────► Headless service governing DNS domain for pods
+  replicas: 3 ───────────────────────────────────────► Manages 3 ordered pods: database-0, 1, 2
+  podManagementPolicy: OrderedReady ─────────────────► Strict ordered startup and shutdown sequencing
+  selector: ─────────────────────────────────────────► Pod selector
+    matchLabels:
+      app: database ─────────────────────────────────► Matches pod template labels
+  template: ─────────────────────────────────────────► Pod blueprint
+    metadata:
+      labels:
+        app: database
+    spec:
+      terminationGracePeriodSeconds: 120 ────────────► 120s grace period: allows clean database WAL flush
+      containers:
+      - name: postgres ──────────────────────────────► Container identifier
+        image: postgres:16-alpine ───────────────────► PostgreSQL database engine image
+        ports:
+        - containerPort: 5432 ───────────────────────► Default PostgreSQL port
+          name: postgres
+        env: ────────────────────────────────────────► Environment variables
+        - name: POSTGRES_PASSWORD ───────────────────► DB password configuration
+          value: "SecureClusterPass123"
+        volumeMounts: ───────────────────────────────► Mounts storage volume into container filesystem
+        - name: pgdata ──────────────────────────────► References volumeClaimTemplates entry
+          mountPath: /var/lib/postgresql/data ───────► Standard PostgreSQL data directory
+  volumeClaimTemplates: ─────────────────────────────► Dynamically provisions dedicated PVC per pod replica
+  - metadata:
+      name: pgdata ──────────────────────────────────► Volume claim name prefix (e.g., pgdata-database-cluster-0)
+    spec:
+      accessModes: [ "ReadWriteOnce" ] ──────────────► Volume can be mounted as Read-Write by a single node
+      storageClassName: "standard-csi" ──────────────► Dynamic CSI storage provider (e.g. AWS EBS gp3)
+      resources:
+        requests:
+          storage: 20Gi ─────────────────────────────► Allocates 20 Gibibytes persistent disk per replica
+```
+
 ---
 
 #### Manifest D: Standalone Unmanaged Pod (To Demonstrate `--force`)
@@ -908,6 +1174,28 @@ spec:
   - name: busybox
     image: busybox:1.37
     command: ["sleep", "3600"]
+```
+
+##### Visual Structure Breakdown: `unmanaged-troubleshoot-pod.yaml`
+
+```text
+========================================================================================================================
+                  KUBERNETES unmanaged-troubleshoot-pod.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: v1 ──────────────────────────────────────► Core Kubernetes API group
+kind: Pod ───────────────────────────────────────────► Standalone / bare Pod object without a controller
+metadata: ───────────────────────────────────────────► Pod metadata
+  name: unmanaged-troubleshoot-pod ──────────────────► Pod identifier
+  namespace: default ────────────────────────────────► Namespace location
+  labels:
+    purpose: manual-debug ───────────────────────────► Label for identification
+spec: ───────────────────────────────────────────────► Pod execution details
+  containers:
+  - name: busybox ───────────────────────────────────► Container name
+    image: busybox:1.37 ─────────────────────────────► Minimal utility container image
+    command: ["sleep", "3600"] ──────────────────────► Sleeps to keep container alive for debugging
+# NOTE: Because this Pod has NO ownerReferences (no Deployment, ReplicaSet, StatefulSet, Job),
+# "kubectl drain" will REFUSE to evict it unless the "--force" flag is explicitly supplied!
 ```
 
 > [!NOTE]
@@ -1018,6 +1306,23 @@ spec:
           command: ["/bin/sh", "-c", "sleep 15"]
 ```
 
+##### Visual Structure Breakdown: `prestop-grace-period.yaml`
+
+```text
+========================================================================================================================
+                     KUBERNETES prestop-grace-period.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+spec: ───────────────────────────────────────────────► Pod specification configuration
+  terminationGracePeriodSeconds: 45 ─────────────────► Total window before SIGKILL; must exceed preStop + app drain
+  containers: ───────────────────────────────────────► Container specifications array
+  - name: api-service ───────────────────────────────► Container identifier
+    image: api-service:v2.4 ─────────────────────────► Application container image
+    lifecycle: ──────────────────────────────────────► Lifecycle hook triggers
+      preStop: ──────────────────────────────────────► Executes immediately upon eviction before SIGTERM
+        exec: ───────────────────────────────────────► Synchronous shell command execution
+          command: ["/bin/sh", "-c", "sleep 15"] ────► CRITICAL: Pauses 15s to let Ingress & kube-proxy drop endpoint
+```
+
 ---
 
 ### 13. Advanced PDB Configurations: `unhealthyPodEvictionPolicy` (Kubernetes 1.27+)
@@ -1058,6 +1363,25 @@ spec:
   selector:
     matchLabels:
       app: backend
+```
+
+##### Visual Structure Breakdown: `resilient-backend-pdb.yaml`
+
+```text
+========================================================================================================================
+                     KUBERNETES resilient-backend-pdb.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: policy/v1 ───────────────────────────────► API group & version for cluster disruption budgets
+kind: PodDisruptionBudget ───────────────────────────► Declares a PodDisruptionBudget availability rule
+metadata: ───────────────────────────────────────────► Object metadata
+  name: resilient-backend-pdb ───────────────────────► Unique name for this disruption budget
+  namespace: production ─────────────────────────────► Namespace scope of target backend pods
+spec: ───────────────────────────────────────────────► Disruption budget specifications
+  minAvailable: 80% ─────────────────────────────────► At least 80% of healthy pods must remain running during drain
+  unhealthyPodEvictionPolicy: AlwaysAllow ───────────► CRITICAL (K8s 1.27+): Crashing/unhealthy pods are evicted immediately
+  selector: ─────────────────────────────────────────► Target pod selection
+    matchLabels: ────────────────────────────────────► Label key-value pairs
+      app: backend ──────────────────────────────────► Applies policy to all pods labeled "app: backend"
 ```
 
 ---
@@ -1114,6 +1438,49 @@ provisioner: kubernetes.io/no-provisioner
 volumeBindingMode: WaitForFirstConsumer
 ```
 
+##### Visual Structure Breakdown: `local-nvme-pv.yaml`
+
+```text
+========================================================================================================================
+                        KUBERNETES local-nvme-pv.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: v1 ──────────────────────────────────────► Core Kubernetes API group
+kind: PersistentVolume ──────────────────────────────► Cluster-scoped storage volume representing physical disk
+metadata: ───────────────────────────────────────────► PV metadata
+  name: local-nvme-pv ───────────────────────────────► Unique volume identifier
+spec: ───────────────────────────────────────────────► Volume specification
+  capacity: ─────────────────────────────────────────► Physical capacity of local disk
+    storage: 500Gi ──────────────────────────────────► 500 Gibibytes storage available
+  accessModes: ──────────────────────────────────────► Volume mount capabilities
+  - ReadWriteOnce ───────────────────────────────────► Can be mounted read-write by a single node only
+  persistentVolumeReclaimPolicy: Retain ─────────────► Retains underlying disk and data upon PVC deletion
+  storageClassName: local-storage ───────────────────► Binds to local-storage StorageClass
+  local: ────────────────────────────────────────────► Identifies this as a local physical disk volume
+    path: /mnt/fast-disks/vol1 ──────────────────────► Absolute path to physical NVMe mount point on host
+  nodeAffinity: ─────────────────────────────────────► CRITICAL: Pins this PV to a specific physical worker node
+    required: ───────────────────────────────────────► Hard scheduling requirement
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname ───────────────► Matches node hostname label
+          operator: In ──────────────────────────────► Set membership operator
+          values:
+          - worker-1 ────────────────────────────────► Volume physically exists ONLY on worker-1 (Locks pods to this node!)
+```
+
+##### Visual Structure Breakdown: `local-storageclass.yaml`
+
+```text
+========================================================================================================================
+                     KUBERNETES local-storageclass.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+apiVersion: storage.k8s.io/v1 ───────────────────────► Storage API group & version
+kind: StorageClass ──────────────────────────────────► Storage profile and dynamic provisioning policy
+metadata:
+  name: local-storage ───────────────────────────────► StorageClass identifier referenced by PVCs and PVs
+provisioner: kubernetes.io/no-provisioner ───────────► No dynamic volume creation (local PVs pre-created manually)
+volumeBindingMode: WaitForFirstConsumer ─────────────► CRITICAL: Delays volume binding until Pod is scheduled
+```
+
 > [!WARNING]
 > **What happens during drain with Local PVs?**
 > If you drain `worker-1`, any pod bound to `local-nvme-pv` is evicted. The StatefulSet controller creates a replacement pod referencing the same PVC. However, `local-nvme-pv` is physically tied to `worker-1` via `nodeAffinity`. Since `worker-1` is cordoned (`spec.unschedulable: true`), `kube-scheduler` reports:
@@ -1148,6 +1515,23 @@ tolerations:
   operator: Exists
   effect: NoExecute
   tolerationSeconds: 300
+```
+
+##### Visual Structure Breakdown: `node-failure-tolerations.yaml`
+
+```text
+========================================================================================================================
+                   KUBERNETES node-failure-tolerations.yaml STRUCTURE BREAKDOWN
+========================================================================================================================
+tolerations: ────────────────────────────────────────► Pod toleration definitions
+- key: node.kubernetes.io/not-ready ─────────────────► Taint applied by Node Controller when node is NotReady
+  operator: Exists ──────────────────────────────────► Matches key regardless of value
+  effect: NoExecute ─────────────────────────────────► Evicts pod from node if toleration expires
+  tolerationSeconds: 300 ────────────────────────────► Default: Wait 300 seconds (5m) before evicting crashed pod
+- key: node.kubernetes.io/unreachable ───────────────► Taint applied when node fails heartbeats / unreachable
+  operator: Exists ──────────────────────────────────► Matches key regardless of value
+  effect: NoExecute ─────────────────────────────────► Evicts pod from node if toleration expires
+  tolerationSeconds: 300 ────────────────────────────► Default: Wait 300 seconds (5m) before evicting
 ```
 * **Meaning**: When a node crashes unexpectedly, Kubernetes waits **300 seconds (5 minutes)** before evicting pods from the failed node.
 * **Why 5 minutes?** This prevents massive "pod thrashing" or cascading failovers caused by transient network blips or quick reboots.
